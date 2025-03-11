@@ -240,9 +240,7 @@ func TestMemmoveAtomicity(t *testing.T) {
 				for i := range src {
 					src[i] = &x
 				}
-				for i := range dst {
-					dst[i] = nil
-				}
+				clear(dst)
 
 				var ready atomic.Uint32
 				go func() {
@@ -294,6 +292,7 @@ func BenchmarkMemmove(b *testing.B) {
 	benchmarkSizes(b, bufSizes, func(b *testing.B, n int) {
 		x := make([]byte, n)
 		y := make([]byte, n)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x, y)
 		}
@@ -303,6 +302,7 @@ func BenchmarkMemmove(b *testing.B) {
 func BenchmarkMemmoveOverlap(b *testing.B) {
 	benchmarkSizes(b, bufSizesOverlap, func(b *testing.B, n int) {
 		x := make([]byte, n+16)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[16:n+16], x[:n])
 		}
@@ -313,6 +313,7 @@ func BenchmarkMemmoveUnalignedDst(b *testing.B) {
 	benchmarkSizes(b, bufSizes, func(b *testing.B, n int) {
 		x := make([]byte, n+1)
 		y := make([]byte, n)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[1:], y)
 		}
@@ -322,6 +323,7 @@ func BenchmarkMemmoveUnalignedDst(b *testing.B) {
 func BenchmarkMemmoveUnalignedDstOverlap(b *testing.B) {
 	benchmarkSizes(b, bufSizesOverlap, func(b *testing.B, n int) {
 		x := make([]byte, n+16)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[16:n+16], x[1:n+1])
 		}
@@ -332,6 +334,7 @@ func BenchmarkMemmoveUnalignedSrc(b *testing.B) {
 	benchmarkSizes(b, bufSizes, func(b *testing.B, n int) {
 		x := make([]byte, n)
 		y := make([]byte, n+1)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x, y[1:])
 		}
@@ -364,6 +367,7 @@ func BenchmarkMemmoveUnalignedSrcDst(b *testing.B) {
 func BenchmarkMemmoveUnalignedSrcOverlap(b *testing.B) {
 	benchmarkSizes(b, bufSizesOverlap, func(b *testing.B, n int) {
 		x := make([]byte, n+1)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			copy(x[1:n+1], x[:n])
 		}
@@ -452,10 +456,9 @@ func BenchmarkMemclrUnaligned(b *testing.B) {
 func BenchmarkGoMemclr(b *testing.B) {
 	benchmarkSizes(b, []int{5, 16, 64, 256}, func(b *testing.B, n int) {
 		x := make([]byte, n)
+		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			for j := range x {
-				x[j] = 0
-			}
+			clear(x)
 		}
 	})
 }

@@ -328,22 +328,22 @@ func ExampleTitle() {
 	// Compare this example to the ToTitle example.
 	fmt.Println(strings.Title("her royal highness"))
 	fmt.Println(strings.Title("loud noises"))
-	fmt.Println(strings.Title("хлеб"))
+	fmt.Println(strings.Title("брат"))
 	// Output:
 	// Her Royal Highness
 	// Loud Noises
-	// Хлеб
+	// Брат
 }
 
 func ExampleToTitle() {
 	// Compare this example to the Title example.
 	fmt.Println(strings.ToTitle("her royal highness"))
 	fmt.Println(strings.ToTitle("loud noises"))
-	fmt.Println(strings.ToTitle("хлеб"))
+	fmt.Println(strings.ToTitle("брат"))
 	// Output:
 	// HER ROYAL HIGHNESS
 	// LOUD NOISES
-	// ХЛЕБ
+	// БРАТ
 }
 
 func ExampleToTitleSpecial() {
@@ -388,8 +388,8 @@ func ExampleToLower() {
 }
 
 func ExampleToLowerSpecial() {
-	fmt.Println(strings.ToLowerSpecial(unicode.TurkishCase, "Önnek İş"))
-	// Output: önnek iş
+	fmt.Println(strings.ToLowerSpecial(unicode.TurkishCase, "Örnek İş"))
+	// Output: örnek iş
 }
 
 func ExampleTrim() {
@@ -457,4 +457,94 @@ func ExampleToValidUTF8() {
 	// abc
 	// abc
 	// abc
+}
+
+func ExampleLines() {
+	text := "Hello\nWorld\nGo Programming\n"
+	for line := range strings.Lines(text) {
+		fmt.Printf("%q\n", line)
+	}
+
+	// Output:
+	// "Hello\n"
+	// "World\n"
+	// "Go Programming\n"
+}
+
+func ExampleSplitSeq() {
+	s := "a,b,c,d"
+	for part := range strings.SplitSeq(s, ",") {
+		fmt.Printf("%q\n", part)
+	}
+
+	// Output:
+	// "a"
+	// "b"
+	// "c"
+	// "d"
+}
+
+func ExampleSplitAfterSeq() {
+	s := "a,b,c,d"
+	for part := range strings.SplitAfterSeq(s, ",") {
+		fmt.Printf("%q\n", part)
+	}
+
+	// Output:
+	// "a,"
+	// "b,"
+	// "c,"
+	// "d"
+}
+
+func ExampleFieldsSeq() {
+	text := "The quick brown fox"
+	fmt.Println("Split string into fields:")
+	for word := range strings.FieldsSeq(text) {
+		fmt.Printf("%q\n", word)
+	}
+
+	textWithSpaces := "  lots   of   spaces  "
+	fmt.Println("\nSplit string with multiple spaces:")
+	for word := range strings.FieldsSeq(textWithSpaces) {
+		fmt.Printf("%q\n", word)
+	}
+
+	// Output:
+	// Split string into fields:
+	// "The"
+	// "quick"
+	// "brown"
+	// "fox"
+	//
+	// Split string with multiple spaces:
+	// "lots"
+	// "of"
+	// "spaces"
+}
+
+func ExampleFieldsFuncSeq() {
+	text := "The quick brown fox"
+	fmt.Println("Split on whitespace(similar to FieldsSeq):")
+	for word := range strings.FieldsFuncSeq(text, unicode.IsSpace) {
+		fmt.Printf("%q\n", word)
+	}
+
+	mixedText := "abc123def456ghi"
+	fmt.Println("\nSplit on digits:")
+	for word := range strings.FieldsFuncSeq(mixedText, unicode.IsDigit) {
+		fmt.Printf("%q\n", word)
+	}
+
+	// Output:
+	// Split on whitespace(similar to FieldsSeq):
+	// "The"
+	// "quick"
+	// "brown"
+	// "fox"
+	//
+	// Split on digits:
+	// "abc"
+	// "def"
+	// "ghi"
 }

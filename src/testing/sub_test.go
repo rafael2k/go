@@ -7,9 +7,9 @@ package testing
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +19,101 @@ import (
 func init() {
 	// Make benchmark tests run 10x faster.
 	benchTime.d = 100 * time.Millisecond
+}
+
+func TestTestState(t *T) {
+	const (
+		add1 = 0
+		done = 1
+	)
+	type call struct {
+		typ int // run or done
+		// result from applying the call
+		running int
+		waiting int
+		started bool
+	}
+	testCases := []struct {
+		max int
+		run []call
+	}{{
+		max: 1,
+		run: []call{
+			{typ: add1, running: 1, waiting: 0, started: true},
+			{typ: done, running: 0, waiting: 0, started: false},
+		},
+	}, {
+		max: 1,
+		run: []call{
+			{typ: add1, running: 1, waiting: 0, started: true},
+			{typ: add1, running: 1, waiting: 1, started: false},
+			{typ: done, running: 1, waiting: 0, started: true},
+			{typ: done, running: 0, waiting: 0, started: false},
+			{typ: add1, running: 1, waiting: 0, started: true},
+		},
+	}, {
+		max: 3,
+		run: []call{
+			{typ: add1, running: 1, waiting: 0, started: true},
+			{typ: add1, running: 2, waiting: 0, started: true},
+			{typ: add1, running: 3, waiting: 0, started: true},
+			{typ: add1, running: 3, waiting: 1, started: false},
+			{typ: add1, running: 3, waiting: 2, started: false},
+			{typ: add1, running: 3, waiting: 3, started: false},
+			{typ: done, running: 3, waiting: 2, started: true},
+			{typ: add1, running: 3, waiting: 3, started: false},
+			{typ: done, running: 3, waiting: 2, started: true},
+			{typ: done, running: 3, waiting: 1, started: true},
+			{typ: done, running: 3, waiting: 0, started: true},
+			{typ: done, running: 2, waiting: 0, started: false},
+			{typ: done, running: 1, waiting: 0, started: false},
+			{typ: done, running: 0, waiting: 0, started: false},
+		},
+	}}
+	for i, tc := range testCases {
+		tstate := &testState{
+			startParallel: make(chan bool),
+			maxParallel:   tc.max,
+		}
+		for j, call := range tc.run {
+			doCall := func(f func()) chan bool {
+				done := make(chan bool)
+				go func() {
+					f()
+					done <- true
+				}()
+				return done
+			}
+			started := false
+			switch call.typ {
+			case add1:
+				signal := doCall(tstate.waitParallel)
+				select {
+				case <-signal:
+					started = true
+				case tstate.startParallel <- true:
+					<-signal
+				}
+			case done:
+				signal := doCall(tstate.release)
+				select {
+				case <-signal:
+				case <-tstate.startParallel:
+					started = true
+					<-signal
+				}
+			}
+			if started != call.started {
+				t.Errorf("%d:%d:started: got %v; want %v", i, j, started, call.started)
+			}
+			if tstate.running != call.running {
+				t.Errorf("%d:%d:running: got %v; want %v", i, j, tstate.running, call.running)
+			}
+			if tstate.numWaiting != call.waiting {
+				t.Errorf("%d:%d:waiting: got %v; want %v", i, j, tstate.numWaiting, call.waiting)
+			}
+		}
+	}
 }
 
 func TestTRun(t *T) {
@@ -411,22 +506,23 @@ func TestTRun(t *T) {
 	}}
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *T) {
-			ctx := newTestContext(tc.maxPar, allMatcher())
+			tstate := newTestState(tc.maxPar, allMatcher())
 			buf := &strings.Builder{}
 			root := &T{
 				common: common{
-					doneOrParallel: make(chan struct{}),
-					runParallel:    make(chan struct{}),
-					name:           "",
-					w:              buf,
+					signal:  make(chan bool),
+					barrier: make(chan bool),
+					name:    "",
+					w:       buf,
 				},
-				context: ctx,
+				tstate: tstate,
 			}
 			if tc.chatty {
 				root.chatty = newChattyPrinter(root.w)
 				root.chatty.json = tc.json
 			}
 			ok := root.Run(tc.desc, tc.f)
+			tstate.release()
 
 			if ok != tc.ok {
 				t.Errorf("%s:ok: got %v; want %v", tc.desc, ok, tc.ok)
@@ -434,8 +530,8 @@ func TestTRun(t *T) {
 			if ok != !root.Failed() {
 				t.Errorf("%s:root failed: got %v; want %v", tc.desc, !ok, root.Failed())
 			}
-			if n := ctx.running(); n != 0 {
-				t.Errorf("%s:running non-zero: got %d", tc.desc, n)
+			if tstate.running != 0 || tstate.numWaiting != 0 {
+				t.Errorf("%s:running and waiting non-zero: got %d and %d", tc.desc, tstate.running, tstate.numWaiting)
 			}
 			got := strings.TrimSpace(buf.String())
 			want := strings.TrimSpace(tc.output)
@@ -604,9 +700,9 @@ func TestBRun(t *T) {
 			// the benchtime and catch the failure result of the subbenchmark.
 			root := &B{
 				common: common{
-					doneOrParallel: make(chan struct{}),
-					name:           "root",
-					w:              buf,
+					signal: make(chan bool),
+					name:   "root",
+					w:      buf,
 				},
 				benchFunc: func(b *B) { ok = b.Run("test", tc.f) }, // Use Run to catch failure.
 				benchTime: durationOrCountFlag{d: 1 * time.Microsecond},
@@ -670,22 +766,6 @@ func TestBenchmarkReadMemStatsBeforeFirstRun(t *T) {
 	})
 }
 
-func TestParallelSub(t *T) {
-	c := make(chan int)
-	block := make(chan int)
-	for i := 0; i < 10; i++ {
-		go func(i int) {
-			<-block
-			t.Run(fmt.Sprint(i), func(t *T) {})
-			c <- 1
-		}(i)
-	}
-	close(block)
-	for i := 0; i < 10; i++ {
-		<-c
-	}
-}
-
 type funcWriter struct {
 	write func([]byte) (int, error)
 }
@@ -709,8 +789,8 @@ func TestRacyOutput(t *T) {
 	}
 
 	root := &T{
-		common:  common{w: &funcWriter{raceDetector}},
-		context: newTestContext(1, allMatcher()),
+		common: common{w: &funcWriter{raceDetector}},
+		tstate: newTestState(1, allMatcher()),
 	}
 	root.chatty = newChattyPrinter(root.w)
 	root.Run("", func(t *T) {
@@ -734,16 +814,16 @@ func TestRacyOutput(t *T) {
 
 // The late log message did not include the test name.  Issue 29388.
 func TestLogAfterComplete(t *T) {
-	ctx := newTestContext(1, allMatcher())
+	tstate := newTestState(1, allMatcher())
 	var buf bytes.Buffer
 	t1 := &T{
 		common: common{
 			// Use a buffered channel so that tRunner can write
 			// to it although nothing is reading from it.
-			doneOrParallel: make(chan struct{}),
-			w:              &buf,
+			signal: make(chan bool, 1),
+			w:      &buf,
 		},
-		context: ctx,
+		tstate: tstate,
 	}
 
 	c1 := make(chan bool)
@@ -805,7 +885,7 @@ func TestCleanup(t *T) {
 		t.Cleanup(func() { cleanups = append(cleanups, 1) })
 		t.Cleanup(func() { cleanups = append(cleanups, 2) })
 	})
-	if got, want := cleanups, []int{2, 1}; !reflect.DeepEqual(got, want) {
+	if got, want := cleanups, []int{2, 1}; !slices.Equal(got, want) {
 		t.Errorf("unexpected cleanup record; got %v want %v", got, want)
 	}
 }

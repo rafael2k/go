@@ -323,6 +323,9 @@ func rewriteValue386(v *Value) bool {
 	case OpCtz32NonZero:
 		v.Op = Op386BSFL
 		return true
+	case OpCtz64On32:
+		v.Op = Op386LoweredCtz64
+		return true
 	case OpCtz8:
 		return rewriteValue386_OpCtz8(v)
 	case OpCtz8NonZero:
@@ -3488,6 +3491,19 @@ func rewriteValue386_Op386MOVBLSXload(v *Value) bool {
 		v.AddArg2(base, mem)
 		return true
 	}
+	// match: (MOVBLSXload [off] {sym} (SB) _)
+	// cond: symIsRO(sym)
+	// result: (MOVLconst [int32(int8(read8(sym, int64(off))))])
+	for {
+		off := auxIntToInt32(v.AuxInt)
+		sym := auxToSym(v.Aux)
+		if v_0.Op != OpSB || !(symIsRO(sym)) {
+			break
+		}
+		v.reset(Op386MOVLconst)
+		v.AuxInt = int32ToAuxInt(int32(int8(read8(sym, int64(off)))))
+		return true
+	}
 	return false
 }
 func rewriteValue386_Op386MOVBLZX(v *Value) bool {
@@ -4669,6 +4685,19 @@ func rewriteValue386_Op386MOVWLSXload(v *Value) bool {
 		v.AddArg2(base, mem)
 		return true
 	}
+	// match: (MOVWLSXload [off] {sym} (SB) _)
+	// cond: symIsRO(sym)
+	// result: (MOVLconst [int32(int16(read16(sym, int64(off), config.ctxt.Arch.ByteOrder)))])
+	for {
+		off := auxIntToInt32(v.AuxInt)
+		sym := auxToSym(v.Aux)
+		if v_0.Op != OpSB || !(symIsRO(sym)) {
+			break
+		}
+		v.reset(Op386MOVLconst)
+		v.AuxInt = int32ToAuxInt(int32(int16(read16(sym, int64(off), config.ctxt.Arch.ByteOrder))))
+		return true
+	}
 	return false
 }
 func rewriteValue386_Op386MOVWLZX(v *Value) bool {
@@ -5273,12 +5302,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: isPowerOfTwo32(c+1) && c >= 15
+	// cond: isPowerOfTwo(c+1) && c >= 15
 	// result: (SUBL (SHLLconst <v.Type> [int32(log32(c+1))] x) x)
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(isPowerOfTwo32(c+1) && c >= 15) {
+		if !(isPowerOfTwo(c+1) && c >= 15) {
 			break
 		}
 		v.reset(Op386SUBL)
@@ -5289,12 +5318,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: isPowerOfTwo32(c-1) && c >= 17
+	// cond: isPowerOfTwo(c-1) && c >= 17
 	// result: (LEAL1 (SHLLconst <v.Type> [int32(log32(c-1))] x) x)
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(isPowerOfTwo32(c-1) && c >= 17) {
+		if !(isPowerOfTwo(c-1) && c >= 17) {
 			break
 		}
 		v.reset(Op386LEAL1)
@@ -5305,12 +5334,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: isPowerOfTwo32(c-2) && c >= 34
+	// cond: isPowerOfTwo(c-2) && c >= 34
 	// result: (LEAL2 (SHLLconst <v.Type> [int32(log32(c-2))] x) x)
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(isPowerOfTwo32(c-2) && c >= 34) {
+		if !(isPowerOfTwo(c-2) && c >= 34) {
 			break
 		}
 		v.reset(Op386LEAL2)
@@ -5321,12 +5350,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: isPowerOfTwo32(c-4) && c >= 68
+	// cond: isPowerOfTwo(c-4) && c >= 68
 	// result: (LEAL4 (SHLLconst <v.Type> [int32(log32(c-4))] x) x)
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(isPowerOfTwo32(c-4) && c >= 68) {
+		if !(isPowerOfTwo(c-4) && c >= 68) {
 			break
 		}
 		v.reset(Op386LEAL4)
@@ -5337,12 +5366,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: isPowerOfTwo32(c-8) && c >= 136
+	// cond: isPowerOfTwo(c-8) && c >= 136
 	// result: (LEAL8 (SHLLconst <v.Type> [int32(log32(c-8))] x) x)
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(isPowerOfTwo32(c-8) && c >= 136) {
+		if !(isPowerOfTwo(c-8) && c >= 136) {
 			break
 		}
 		v.reset(Op386LEAL8)
@@ -5353,12 +5382,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: c%3 == 0 && isPowerOfTwo32(c/3)
+	// cond: c%3 == 0 && isPowerOfTwo(c/3)
 	// result: (SHLLconst [int32(log32(c/3))] (LEAL2 <v.Type> x x))
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(c%3 == 0 && isPowerOfTwo32(c/3)) {
+		if !(c%3 == 0 && isPowerOfTwo(c/3)) {
 			break
 		}
 		v.reset(Op386SHLLconst)
@@ -5369,12 +5398,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: c%5 == 0 && isPowerOfTwo32(c/5)
+	// cond: c%5 == 0 && isPowerOfTwo(c/5)
 	// result: (SHLLconst [int32(log32(c/5))] (LEAL4 <v.Type> x x))
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(c%5 == 0 && isPowerOfTwo32(c/5)) {
+		if !(c%5 == 0 && isPowerOfTwo(c/5)) {
 			break
 		}
 		v.reset(Op386SHLLconst)
@@ -5385,12 +5414,12 @@ func rewriteValue386_Op386MULLconst(v *Value) bool {
 		return true
 	}
 	// match: (MULLconst [c] x)
-	// cond: c%9 == 0 && isPowerOfTwo32(c/9)
+	// cond: c%9 == 0 && isPowerOfTwo(c/9)
 	// result: (SHLLconst [int32(log32(c/9))] (LEAL8 <v.Type> x x))
 	for {
 		c := auxIntToInt32(v.AuxInt)
 		x := v_0
-		if !(c%9 == 0 && isPowerOfTwo32(c/9)) {
+		if !(c%9 == 0 && isPowerOfTwo(c/9)) {
 			break
 		}
 		v.reset(Op386SHLLconst)

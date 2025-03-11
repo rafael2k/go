@@ -51,11 +51,9 @@ TEXT runtime·gogo(SB), NOSPLIT, $0-8
 	I64Load gobuf_pc(R0)
 	I64Store $0
 
-	MOVD gobuf_ret(R0), RET0
 	MOVD gobuf_ctxt(R0), CTXT
 	// clear to help garbage collector
 	MOVD $0, gobuf_sp(R0)
-	MOVD $0, gobuf_ret(R0)
 	MOVD $0, gobuf_ctxt(R0)
 
 	I32Const $1
@@ -194,10 +192,6 @@ TEXT runtime·memhash32(SB),NOSPLIT|NOFRAME,$0-24
 	JMP	runtime·memhash32Fallback(SB)
 TEXT runtime·memhash64(SB),NOSPLIT|NOFRAME,$0-24
 	JMP	runtime·memhash64Fallback(SB)
-
-TEXT runtime·return0(SB), NOSPLIT, $0-0
-	MOVD $0, RET0
-	RET
 
 TEXT runtime·asminit(SB), NOSPLIT, $0-0
 	// No per-thread init.
@@ -554,5 +548,73 @@ TEXT wasm_pc_f_loop(SB),NOSPLIT,$0
 
 	Return
 
+// wasm_pc_f_loop_export is like wasm_pc_f_loop, except that this takes an
+// argument (on Wasm stack) that is a PC_F, and the loop stops when we get
+// to that PC in a normal return (not unwinding).
+// This is for handling an wasmexport function when it needs to switch the
+// stack.
+TEXT wasm_pc_f_loop_export(SB),NOSPLIT,$0
+	Get PAUSE
+	I32Eqz
+outer:
+	If
+		// R1 is whether a function return normally (0) or unwinding (1).
+		// Start with unwinding.
+		I32Const $1
+		Set R1
+	loop:
+		Loop
+			// Get PC_F & PC_B from -8(SP)
+			Get SP
+			I32Const $8
+			I32Sub
+			I32Load16U $2 // PC_F
+			Tee R2
+
+			Get R0
+			I32Eq
+			If // PC_F == R0, we're at the stop PC
+				Get R1
+				I32Eqz
+				// Break if it is a normal return
+				BrIf outer // actually jump to after the corresponding End
+			End
+
+			Get SP
+			I32Const $8
+			I32Sub
+			I32Load16U $0 // PC_B
+
+			Get R2 // PC_F
+			CallIndirect $0
+			Set R1 // save return/unwinding state for next iteration
+
+			Get PAUSE
+			I32Eqz
+			BrIf loop
+		End
+	End
+
+	I32Const $0
+	Set PAUSE
+
+	Return
+
 TEXT wasm_export_lib(SB),NOSPLIT,$0
+	UNDEF
+
+TEXT runtime·pause(SB), NOSPLIT, $0-8
+	MOVD newsp+0(FP), SP
+	I32Const $1
+	Set PAUSE
+	RETUNWIND
+
+// Called if a wasmexport function is called before runtime initialization
+TEXT runtime·notInitialized(SB), NOSPLIT, $0
+	MOVD $runtime·wasmStack+(m0Stack__size-16-8)(SB), SP
+	I32Const $0 // entry PC_B
+	Call runtime·notInitialized1(SB)
+	Drop
+	I32Const $0 // entry PC_B
+	Call runtime·abort(SB)
 	UNDEF

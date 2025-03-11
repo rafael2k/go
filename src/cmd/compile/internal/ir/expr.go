@@ -24,12 +24,12 @@ type Expr interface {
 // A miniExpr is a miniNode with extra fields common to expressions.
 // TODO(rsc): Once we are sure about the contents, compact the bools
 // into a bit field and leave extra bits available for implementations
-// embedding miniExpr. Right now there are ~60 unused bits sitting here.
+// embedding miniExpr. Right now there are ~24 unused bits sitting here.
 type miniExpr struct {
 	miniNode
+	flags bitset8
 	typ   *types.Type
 	init  Nodes // TODO(rsc): Don't require every Node to have an init
-	flags bitset8
 }
 
 const (
@@ -211,7 +211,7 @@ func (n *CallExpr) SetOp(op Op) {
 	case OAPPEND,
 		OCALL, OCALLFUNC, OCALLINTER, OCALLMETH,
 		ODELETE,
-		OGETG, OGETCALLERPC, OGETCALLERSP,
+		OGETG, OGETCALLERSP,
 		OMAKE, OMAX, OMIN, OPRINT, OPRINTLN,
 		ORECOVER, ORECOVERFP:
 		n.op = op
@@ -856,13 +856,19 @@ func IsAddressable(n Node) bool {
 // "g()" expression.
 func StaticValue(n Node) Node {
 	for {
-		if n.Op() == OCONVNOP {
-			n = n.(*ConvExpr).X
-			continue
-		}
-
-		if n.Op() == OINLCALL {
-			n = n.(*InlinedCallExpr).SingleResult()
+		switch n1 := n.(type) {
+		case *ConvExpr:
+			if n1.Op() == OCONVNOP {
+				n = n1.X
+				continue
+			}
+		case *InlinedCallExpr:
+			if n1.Op() == OINLCALL {
+				n = n1.SingleResult()
+				continue
+			}
+		case *ParenExpr:
+			n = n1.X
 			continue
 		}
 

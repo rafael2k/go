@@ -273,7 +273,7 @@ func (r *Rand) Read(p []byte) (n int, err error) {
 	switch src := r.src.(type) {
 	case *lockedSource:
 		return src.read(p, &r.readVal, &r.readPos)
-	case *fastSource:
+	case *runtimeSource:
 		return src.read(p, &r.readVal, &r.readPos)
 	}
 	return read(p, r.src, &r.readVal, &r.readPos)
@@ -313,6 +313,9 @@ var globalRandGenerator atomic.Pointer[Rand]
 
 var randautoseed = godebug.New("randautoseed")
 
+// randseednop controls whether the global Seed is a no-op.
+var randseednop = godebug.New("randseednop")
+
 // globalRand returns the generator to use for the top-level convenience
 // functions.
 func globalRand() *Rand {
@@ -328,8 +331,8 @@ func globalRand() *Rand {
 		r.Seed(1)
 	} else {
 		r = &Rand{
-			src: &fastSource{},
-			s64: &fastSource{},
+			src: &runtimeSource{},
+			s64: &runtimeSource{},
 		}
 	}
 
@@ -346,29 +349,29 @@ func globalRand() *Rand {
 	return r
 }
 
-//go:linkname fastrand64
-func fastrand64() uint64
+//go:linkname runtime_rand runtime.rand
+func runtime_rand() uint64
 
-// fastSource is an implementation of Source64 that uses the runtime
+// runtimeSource is an implementation of Source64 that uses the runtime
 // fastrand functions.
-type fastSource struct {
+type runtimeSource struct {
 	// The mutex is used to avoid race conditions in Read.
 	mu sync.Mutex
 }
 
-func (*fastSource) Int63() int64 {
-	return int64(fastrand64() & rngMask)
+func (*runtimeSource) Int63() int64 {
+	return int64(runtime_rand() & rngMask)
 }
 
-func (*fastSource) Seed(int64) {
-	panic("internal error: call to fastSource.Seed")
+func (*runtimeSource) Seed(int64) {
+	panic("internal error: call to runtimeSource.Seed")
 }
 
-func (*fastSource) Uint64() uint64 {
-	return fastrand64()
+func (*runtimeSource) Uint64() uint64 {
+	return runtime_rand()
 }
 
-func (fs *fastSource) read(p []byte, readVal *int64, readPos *int8) (n int, err error) {
+func (fs *runtimeSource) read(p []byte, readVal *int64, readPos *int8) (n int, err error) {
 	fs.mu.Lock()
 	n, err = read(p, fs, readVal, readPos)
 	fs.mu.Unlock()
@@ -391,7 +394,15 @@ func (fs *fastSource) read(p []byte, readVal *int64, readPos *int8) (n int, err 
 // a random value. Programs that call Seed with a known value to get
 // a specific sequence of results should use New(NewSource(seed)) to
 // obtain a local random generator.
+//
+// As of Go 1.24 [Seed] is a no-op. To restore the previous behavior set
+// GODEBUG=randseednop=0.
 func Seed(seed int64) {
+	if randseednop.Value() != "0" {
+		return
+	}
+	randseednop.IncNonDefault()
+
 	orig := globalRandGenerator.Load()
 
 	// If we are already using a lockedSource, we can just re-seed it.
@@ -405,7 +416,7 @@ func Seed(seed int64) {
 	// Otherwise either
 	// 1) orig == nil, which is the normal case when Seed is the first
 	// top-level function to be called, or
-	// 2) orig is already a fastSource, in which case we need to change
+	// 2) orig is already a runtimeSource, in which case we need to change
 	// to a lockedSource.
 	// Either way we do the same thing.
 
@@ -474,6 +485,7 @@ func Shuffle(n int, swap func(i, j int)) { globalRand().Shuffle(n, swap) }
 // Read, unlike the [Rand.Read] method, is safe for concurrent use.
 //
 // Deprecated: For almost all use cases, [crypto/rand.Read] is more appropriate.
+// If a deterministic source is required, use [math/rand/v2.ChaCha8.Read].
 func Read(p []byte) (n int, err error) { return globalRand().Read(p) }
 
 // NormFloat64 returns a normally distributed float64 in the range

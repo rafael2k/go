@@ -102,6 +102,12 @@ const (
 	BlockLOONG64GEZ
 	BlockLOONG64FPT
 	BlockLOONG64FPF
+	BlockLOONG64BEQ
+	BlockLOONG64BNE
+	BlockLOONG64BGE
+	BlockLOONG64BLT
+	BlockLOONG64BGEU
+	BlockLOONG64BLTU
 
 	BlockMIPSEQ
 	BlockMIPSNE
@@ -244,14 +250,20 @@ var blockString = [...]string{
 	BlockARM64GEnoov:    "GEnoov",
 	BlockARM64JUMPTABLE: "JUMPTABLE",
 
-	BlockLOONG64EQ:  "EQ",
-	BlockLOONG64NE:  "NE",
-	BlockLOONG64LTZ: "LTZ",
-	BlockLOONG64LEZ: "LEZ",
-	BlockLOONG64GTZ: "GTZ",
-	BlockLOONG64GEZ: "GEZ",
-	BlockLOONG64FPT: "FPT",
-	BlockLOONG64FPF: "FPF",
+	BlockLOONG64EQ:   "EQ",
+	BlockLOONG64NE:   "NE",
+	BlockLOONG64LTZ:  "LTZ",
+	BlockLOONG64LEZ:  "LEZ",
+	BlockLOONG64GTZ:  "GTZ",
+	BlockLOONG64GEZ:  "GEZ",
+	BlockLOONG64FPT:  "FPT",
+	BlockLOONG64FPF:  "FPF",
+	BlockLOONG64BEQ:  "BEQ",
+	BlockLOONG64BNE:  "BNE",
+	BlockLOONG64BGE:  "BGE",
+	BlockLOONG64BLT:  "BLT",
+	BlockLOONG64BGEU: "BGEU",
+	BlockLOONG64BLTU: "BLTU",
 
 	BlockMIPSEQ:  "EQ",
 	BlockMIPSNE:  "NE",
@@ -457,6 +469,7 @@ const (
 	Op386BSFL
 	Op386BSFW
 	Op386LoweredCtz32
+	Op386LoweredCtz64
 	Op386BSRL
 	Op386BSRW
 	Op386BSWAPL
@@ -911,6 +924,9 @@ const (
 	OpAMD64SQRTSD
 	OpAMD64SQRTSS
 	OpAMD64ROUNDSD
+	OpAMD64LoweredRound32F
+	OpAMD64LoweredRound64F
+	OpAMD64VFMADD231SS
 	OpAMD64VFMADD231SD
 	OpAMD64MINSD
 	OpAMD64MINSS
@@ -1071,8 +1087,14 @@ const (
 	OpAMD64CMPXCHGQlock
 	OpAMD64ANDBlock
 	OpAMD64ANDLlock
+	OpAMD64ANDQlock
 	OpAMD64ORBlock
 	OpAMD64ORLlock
+	OpAMD64ORQlock
+	OpAMD64LoweredAtomicAnd64
+	OpAMD64LoweredAtomicAnd32
+	OpAMD64LoweredAtomicOr64
+	OpAMD64LoweredAtomicOr32
 	OpAMD64PrefetchT0
 	OpAMD64PrefetchNTA
 	OpAMD64ANDNQ
@@ -1131,6 +1153,13 @@ const (
 	OpAMD64SHRXLloadidx8
 	OpAMD64SHRXQloadidx1
 	OpAMD64SHRXQloadidx8
+	OpAMD64PUNPCKLBW
+	OpAMD64PSHUFLW
+	OpAMD64PSHUFBbroadcast
+	OpAMD64VPBROADCASTB
+	OpAMD64PSIGNB
+	OpAMD64PCMPEQB
+	OpAMD64PMOVMSKB
 
 	OpARMADD
 	OpARMADDconst
@@ -1574,9 +1603,13 @@ const (
 	OpARM64MOVWload
 	OpARM64MOVWUload
 	OpARM64MOVDload
-	OpARM64LDP
 	OpARM64FMOVSload
 	OpARM64FMOVDload
+	OpARM64LDP
+	OpARM64LDPW
+	OpARM64LDPSW
+	OpARM64FLDPD
+	OpARM64FLDPS
 	OpARM64MOVDloadidx
 	OpARM64MOVWloadidx
 	OpARM64MOVWUloadidx
@@ -1597,9 +1630,12 @@ const (
 	OpARM64MOVHstore
 	OpARM64MOVWstore
 	OpARM64MOVDstore
-	OpARM64STP
 	OpARM64FMOVSstore
 	OpARM64FMOVDstore
+	OpARM64STP
+	OpARM64STPW
+	OpARM64FSTPD
+	OpARM64FSTPS
 	OpARM64MOVBstoreidx
 	OpARM64MOVHstoreidx
 	OpARM64MOVWstoreidx
@@ -1706,8 +1742,10 @@ const (
 	OpARM64STLRW
 	OpARM64LoweredAtomicExchange64
 	OpARM64LoweredAtomicExchange32
+	OpARM64LoweredAtomicExchange8
 	OpARM64LoweredAtomicExchange64Variant
 	OpARM64LoweredAtomicExchange32Variant
+	OpARM64LoweredAtomicExchange8Variant
 	OpARM64LoweredAtomicAdd64
 	OpARM64LoweredAtomicAdd32
 	OpARM64LoweredAtomicAdd64Variant
@@ -1717,12 +1755,16 @@ const (
 	OpARM64LoweredAtomicCas64Variant
 	OpARM64LoweredAtomicCas32Variant
 	OpARM64LoweredAtomicAnd8
-	OpARM64LoweredAtomicAnd32
 	OpARM64LoweredAtomicOr8
+	OpARM64LoweredAtomicAnd64
+	OpARM64LoweredAtomicOr64
+	OpARM64LoweredAtomicAnd32
 	OpARM64LoweredAtomicOr32
 	OpARM64LoweredAtomicAnd8Variant
-	OpARM64LoweredAtomicAnd32Variant
 	OpARM64LoweredAtomicOr8Variant
+	OpARM64LoweredAtomicAnd64Variant
+	OpARM64LoweredAtomicOr64Variant
+	OpARM64LoweredAtomicAnd32Variant
 	OpARM64LoweredAtomicOr32Variant
 	OpARM64LoweredWB
 	OpARM64LoweredPanicBoundsA
@@ -1731,6 +1773,25 @@ const (
 	OpARM64PRFM
 	OpARM64DMB
 
+	OpLOONG64NEGV
+	OpLOONG64NEGF
+	OpLOONG64NEGD
+	OpLOONG64SQRTD
+	OpLOONG64SQRTF
+	OpLOONG64ABSD
+	OpLOONG64CLZW
+	OpLOONG64CLZV
+	OpLOONG64CTZW
+	OpLOONG64CTZV
+	OpLOONG64REVB2H
+	OpLOONG64REVB2W
+	OpLOONG64REVBV
+	OpLOONG64BITREV4B
+	OpLOONG64BITREVW
+	OpLOONG64BITREVV
+	OpLOONG64VPCNT64
+	OpLOONG64VPCNT32
+	OpLOONG64VPCNT16
 	OpLOONG64ADDV
 	OpLOONG64ADDVconst
 	OpLOONG64SUBV
@@ -1758,18 +1819,32 @@ const (
 	OpLOONG64XORconst
 	OpLOONG64NOR
 	OpLOONG64NORconst
-	OpLOONG64NEGV
-	OpLOONG64NEGF
-	OpLOONG64NEGD
-	OpLOONG64SQRTD
-	OpLOONG64SQRTF
+	OpLOONG64FMADDF
+	OpLOONG64FMADDD
+	OpLOONG64FMSUBF
+	OpLOONG64FMSUBD
+	OpLOONG64FNMADDF
+	OpLOONG64FNMADDD
+	OpLOONG64FNMSUBF
+	OpLOONG64FNMSUBD
+	OpLOONG64FMINF
+	OpLOONG64FMIND
+	OpLOONG64FMAXF
+	OpLOONG64FMAXD
 	OpLOONG64MASKEQZ
 	OpLOONG64MASKNEZ
+	OpLOONG64FCOPYSGD
+	OpLOONG64SLL
 	OpLOONG64SLLV
+	OpLOONG64SLLconst
 	OpLOONG64SLLVconst
+	OpLOONG64SRL
 	OpLOONG64SRLV
+	OpLOONG64SRLconst
 	OpLOONG64SRLVconst
+	OpLOONG64SRA
 	OpLOONG64SRAV
+	OpLOONG64SRAconst
 	OpLOONG64SRAVconst
 	OpLOONG64ROTR
 	OpLOONG64ROTRV
@@ -1785,6 +1860,8 @@ const (
 	OpLOONG64CMPGED
 	OpLOONG64CMPGTF
 	OpLOONG64CMPGTD
+	OpLOONG64BSTRPICKW
+	OpLOONG64BSTRPICKV
 	OpLOONG64MOVVconst
 	OpLOONG64MOVFconst
 	OpLOONG64MOVDconst
@@ -1798,16 +1875,39 @@ const (
 	OpLOONG64MOVVload
 	OpLOONG64MOVFload
 	OpLOONG64MOVDload
+	OpLOONG64MOVVloadidx
+	OpLOONG64MOVWloadidx
+	OpLOONG64MOVWUloadidx
+	OpLOONG64MOVHloadidx
+	OpLOONG64MOVHUloadidx
+	OpLOONG64MOVBloadidx
+	OpLOONG64MOVBUloadidx
+	OpLOONG64MOVFloadidx
+	OpLOONG64MOVDloadidx
 	OpLOONG64MOVBstore
 	OpLOONG64MOVHstore
 	OpLOONG64MOVWstore
 	OpLOONG64MOVVstore
 	OpLOONG64MOVFstore
 	OpLOONG64MOVDstore
+	OpLOONG64MOVBstoreidx
+	OpLOONG64MOVHstoreidx
+	OpLOONG64MOVWstoreidx
+	OpLOONG64MOVVstoreidx
+	OpLOONG64MOVFstoreidx
+	OpLOONG64MOVDstoreidx
 	OpLOONG64MOVBstorezero
 	OpLOONG64MOVHstorezero
 	OpLOONG64MOVWstorezero
 	OpLOONG64MOVVstorezero
+	OpLOONG64MOVBstorezeroidx
+	OpLOONG64MOVHstorezeroidx
+	OpLOONG64MOVWstorezeroidx
+	OpLOONG64MOVVstorezeroidx
+	OpLOONG64MOVWfpgp
+	OpLOONG64MOVWgpfp
+	OpLOONG64MOVVfpgp
+	OpLOONG64MOVVgpfp
 	OpLOONG64MOVBreg
 	OpLOONG64MOVBUreg
 	OpLOONG64MOVHreg
@@ -1826,6 +1926,8 @@ const (
 	OpLOONG64TRUNCDV
 	OpLOONG64MOVFD
 	OpLOONG64MOVDF
+	OpLOONG64LoweredRound32F
+	OpLOONG64LoweredRound64F
 	OpLOONG64CALLstatic
 	OpLOONG64CALLtail
 	OpLOONG64CALLclosure
@@ -1840,16 +1942,24 @@ const (
 	OpLOONG64LoweredAtomicStore8
 	OpLOONG64LoweredAtomicStore32
 	OpLOONG64LoweredAtomicStore64
-	OpLOONG64LoweredAtomicStorezero32
-	OpLOONG64LoweredAtomicStorezero64
+	OpLOONG64LoweredAtomicStore8Variant
+	OpLOONG64LoweredAtomicStore32Variant
+	OpLOONG64LoweredAtomicStore64Variant
 	OpLOONG64LoweredAtomicExchange32
 	OpLOONG64LoweredAtomicExchange64
+	OpLOONG64LoweredAtomicExchange8Variant
 	OpLOONG64LoweredAtomicAdd32
 	OpLOONG64LoweredAtomicAdd64
-	OpLOONG64LoweredAtomicAddconst32
-	OpLOONG64LoweredAtomicAddconst64
 	OpLOONG64LoweredAtomicCas32
 	OpLOONG64LoweredAtomicCas64
+	OpLOONG64LoweredAtomicCas64Variant
+	OpLOONG64LoweredAtomicCas32Variant
+	OpLOONG64LoweredAtomicAnd32
+	OpLOONG64LoweredAtomicOr32
+	OpLOONG64LoweredAtomicAnd32value
+	OpLOONG64LoweredAtomicAnd64value
+	OpLOONG64LoweredAtomicOr32value
+	OpLOONG64LoweredAtomicOr64value
 	OpLOONG64LoweredNilCheck
 	OpLOONG64FPFlagTrue
 	OpLOONG64FPFlagFalse
@@ -1857,6 +1967,7 @@ const (
 	OpLOONG64LoweredGetCallerSP
 	OpLOONG64LoweredGetCallerPC
 	OpLOONG64LoweredWB
+	OpLOONG64LoweredPubBarrier
 	OpLOONG64LoweredPanicBoundsA
 	OpLOONG64LoweredPanicBoundsB
 	OpLOONG64LoweredPanicBoundsC
@@ -2116,6 +2227,8 @@ const (
 	OpPPC64SUBFCconst
 	OpPPC64FSUB
 	OpPPC64FSUBS
+	OpPPC64XSMINJDP
+	OpPPC64XSMAXJDP
 	OpPPC64MULLD
 	OpPPC64MULLW
 	OpPPC64MULLDconst
@@ -2124,6 +2237,7 @@ const (
 	OpPPC64MULHD
 	OpPPC64MULHW
 	OpPPC64MULHDU
+	OpPPC64MULHDUCC
 	OpPPC64MULHWU
 	OpPPC64FMUL
 	OpPPC64FMULS
@@ -2146,6 +2260,7 @@ const (
 	OpPPC64ADDCconst
 	OpPPC64SUBCconst
 	OpPPC64ADDE
+	OpPPC64ADDZE
 	OpPPC64SUBE
 	OpPPC64ADDZEzero
 	OpPPC64SUBZEzero
@@ -2162,6 +2277,7 @@ const (
 	OpPPC64RLWNM
 	OpPPC64RLWMI
 	OpPPC64RLDICL
+	OpPPC64RLDICLCC
 	OpPPC64RLDICR
 	OpPPC64CNTLZD
 	OpPPC64CNTLZDCC
@@ -2218,6 +2334,7 @@ const (
 	OpPPC64ORconst
 	OpPPC64XORconst
 	OpPPC64ANDCCconst
+	OpPPC64ANDconst
 	OpPPC64MOVBreg
 	OpPPC64MOVBZreg
 	OpPPC64MOVHreg
@@ -2323,6 +2440,7 @@ const (
 	OpPPC64LoweredAtomicLoadPtr
 	OpPPC64LoweredAtomicAdd32
 	OpPPC64LoweredAtomicAdd64
+	OpPPC64LoweredAtomicExchange8
 	OpPPC64LoweredAtomicExchange32
 	OpPPC64LoweredAtomicExchange64
 	OpPPC64LoweredAtomicCas64
@@ -2388,22 +2506,40 @@ const (
 	OpRISCV64MOVWUreg
 	OpRISCV64MOVDnop
 	OpRISCV64SLL
+	OpRISCV64SLLW
 	OpRISCV64SRA
 	OpRISCV64SRAW
 	OpRISCV64SRL
 	OpRISCV64SRLW
 	OpRISCV64SLLI
+	OpRISCV64SLLIW
 	OpRISCV64SRAI
 	OpRISCV64SRAIW
 	OpRISCV64SRLI
 	OpRISCV64SRLIW
-	OpRISCV64XOR
-	OpRISCV64XORI
-	OpRISCV64OR
-	OpRISCV64ORI
+	OpRISCV64SH1ADD
+	OpRISCV64SH2ADD
+	OpRISCV64SH3ADD
 	OpRISCV64AND
+	OpRISCV64ANDN
 	OpRISCV64ANDI
 	OpRISCV64NOT
+	OpRISCV64OR
+	OpRISCV64ORN
+	OpRISCV64ORI
+	OpRISCV64ROL
+	OpRISCV64ROLW
+	OpRISCV64ROR
+	OpRISCV64RORI
+	OpRISCV64RORIW
+	OpRISCV64RORW
+	OpRISCV64XNOR
+	OpRISCV64XOR
+	OpRISCV64XORI
+	OpRISCV64MIN
+	OpRISCV64MAX
+	OpRISCV64MINU
+	OpRISCV64MAXU
 	OpRISCV64SEQZ
 	OpRISCV64SNEZ
 	OpRISCV64SLT
@@ -2464,6 +2600,8 @@ const (
 	OpRISCV64FNES
 	OpRISCV64FLTS
 	OpRISCV64FLES
+	OpRISCV64LoweredFMAXS
+	OpRISCV64LoweredFMINS
 	OpRISCV64FADDD
 	OpRISCV64FSUBD
 	OpRISCV64FMULD
@@ -2489,6 +2627,8 @@ const (
 	OpRISCV64FNED
 	OpRISCV64FLTD
 	OpRISCV64FLED
+	OpRISCV64LoweredFMIND
+	OpRISCV64LoweredFMAXD
 
 	OpS390XFADDS
 	OpS390XFADD
@@ -3009,6 +3149,7 @@ const (
 	OpCtz16
 	OpCtz32
 	OpCtz64
+	OpCtz64On32
 	OpCtz8NonZero
 	OpCtz16NonZero
 	OpCtz32NonZero
@@ -3041,6 +3182,10 @@ const (
 	OpRoundToEven
 	OpAbs
 	OpCopysign
+	OpMin64
+	OpMax64
+	OpMin64u
+	OpMax64u
 	OpMin64F
 	OpMin32F
 	OpMax64F
@@ -3145,11 +3290,7 @@ const (
 	OpIMake
 	OpITab
 	OpIData
-	OpStructMake0
-	OpStructMake1
-	OpStructMake2
-	OpStructMake3
-	OpStructMake4
+	OpStructMake
 	OpStructSelect
 	OpArrayMake0
 	OpArrayMake1
@@ -3201,6 +3342,7 @@ const (
 	OpAtomicStorePtrNoWB
 	OpAtomicStoreRel32
 	OpAtomicStoreRel64
+	OpAtomicExchange8
 	OpAtomicExchange32
 	OpAtomicExchange64
 	OpAtomicAdd32
@@ -3209,19 +3351,31 @@ const (
 	OpAtomicCompareAndSwap64
 	OpAtomicCompareAndSwapRel32
 	OpAtomicAnd8
-	OpAtomicAnd32
 	OpAtomicOr8
+	OpAtomicAnd32
 	OpAtomicOr32
+	OpAtomicAnd64value
+	OpAtomicAnd32value
+	OpAtomicAnd8value
+	OpAtomicOr64value
+	OpAtomicOr32value
+	OpAtomicOr8value
+	OpAtomicStore8Variant
+	OpAtomicStore32Variant
+	OpAtomicStore64Variant
 	OpAtomicAdd32Variant
 	OpAtomicAdd64Variant
+	OpAtomicExchange8Variant
 	OpAtomicExchange32Variant
 	OpAtomicExchange64Variant
 	OpAtomicCompareAndSwap32Variant
 	OpAtomicCompareAndSwap64Variant
-	OpAtomicAnd8Variant
-	OpAtomicAnd32Variant
-	OpAtomicOr8Variant
-	OpAtomicOr32Variant
+	OpAtomicAnd64valueVariant
+	OpAtomicOr64valueVariant
+	OpAtomicAnd32valueVariant
+	OpAtomicOr32valueVariant
+	OpAtomicAnd8valueVariant
+	OpAtomicOr8valueVariant
 	OpPubBarrier
 	OpClobber
 	OpClobberReg
@@ -5095,6 +5249,21 @@ var opcodeTable = [...]opInfo{
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 239}, // AX CX DX BX BP SI DI
+			},
+			outputs: []outputInfo{
+				{0, 239}, // AX CX DX BX BP SI DI
+			},
+		},
+	},
+	{
+		name:            "LoweredCtz64",
+		argLen:          2,
+		resultNotInArgs: true,
+		clobberFlags:    true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 239}, // AX CX DX BX BP SI DI
+				{1, 239}, // AX CX DX BX BP SI DI
 			},
 			outputs: []outputInfo{
 				{0, 239}, // AX CX DX BX BP SI DI
@@ -11908,6 +12077,50 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:         "LoweredRound32F",
+		argLen:       1,
+		resultInArg0: true,
+		zeroWidth:    true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:         "LoweredRound64F",
+		argLen:       1,
+		resultInArg0: true,
+		zeroWidth:    true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:         "VFMADD231SS",
+		argLen:       3,
+		resultInArg0: true,
+		asm:          x86.AVFMADD231SS,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+				{1, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+				{2, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
 		name:         "VFMADD231SD",
 		argLen:       3,
 		resultInArg0: true,
@@ -14100,6 +14313,22 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:           "ANDQlock",
+		auxType:        auxSymOff,
+		argLen:         3,
+		clobberFlags:   true,
+		faultOnNilArg0: true,
+		hasSideEffects: true,
+		symEffect:      SymRdWr,
+		asm:            x86.AANDQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 49151},      // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{0, 4295032831}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 g R15 SB
+			},
+		},
+	},
+	{
 		name:           "ORBlock",
 		auxType:        auxSymOff,
 		argLen:         3,
@@ -14128,6 +14357,114 @@ var opcodeTable = [...]opInfo{
 			inputs: []inputInfo{
 				{1, 49151},      // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 R15
 				{0, 4295032831}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 g R15 SB
+			},
+		},
+	},
+	{
+		name:           "ORQlock",
+		auxType:        auxSymOff,
+		argLen:         3,
+		clobberFlags:   true,
+		faultOnNilArg0: true,
+		hasSideEffects: true,
+		symEffect:      SymRdWr,
+		asm:            x86.AORQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 49151},      // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{0, 4295032831}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 g R15 SB
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd64",
+		auxType:         auxSymOff,
+		argLen:          3,
+		resultNotInArgs: true,
+		clobberFlags:    true,
+		needIntTemp:     true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		symEffect:       SymRdWr,
+		asm:             x86.AANDQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{1, 0},
+				{0, 1}, // AX
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd32",
+		auxType:         auxSymOff,
+		argLen:          3,
+		resultNotInArgs: true,
+		clobberFlags:    true,
+		needIntTemp:     true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		symEffect:       SymRdWr,
+		asm:             x86.AANDL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{1, 0},
+				{0, 1}, // AX
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicOr64",
+		auxType:         auxSymOff,
+		argLen:          3,
+		resultNotInArgs: true,
+		clobberFlags:    true,
+		needIntTemp:     true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		symEffect:       SymRdWr,
+		asm:             x86.AORQ,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{1, 0},
+				{0, 1}, // AX
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicOr32",
+		auxType:         auxSymOff,
+		argLen:          3,
+		resultNotInArgs: true,
+		clobberFlags:    true,
+		needIntTemp:     true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		symEffect:       SymRdWr,
+		asm:             x86.AORL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, 49134}, // CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{1, 0},
+				{0, 1}, // AX
 			},
 		},
 	},
@@ -15057,6 +15394,106 @@ var opcodeTable = [...]opInfo{
 				{2, 49135},      // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
 				{1, 49151},      // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 R15
 				{0, 4295032831}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 g R15 SB
+			},
+			outputs: []outputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:         "PUNPCKLBW",
+		argLen:       2,
+		resultInArg0: true,
+		asm:          x86.APUNPCKLBW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+				{1, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:    "PSHUFLW",
+		auxType: auxInt8,
+		argLen:  1,
+		asm:     x86.APSHUFLW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:         "PSHUFBbroadcast",
+		argLen:       1,
+		resultInArg0: true,
+		asm:          x86.APSHUFB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:   "VPBROADCASTB",
+		argLen: 1,
+		asm:    x86.AVPBROADCASTB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:         "PSIGNB",
+		argLen:       2,
+		resultInArg0: true,
+		asm:          x86.APSIGNB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+				{1, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:         "PCMPEQB",
+		argLen:       2,
+		commutative:  true,
+		resultInArg0: true,
+		asm:          x86.APCMPEQB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+				{1, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+			outputs: []outputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
+			},
+		},
+	},
+	{
+		name:   "PMOVMSKB",
+		argLen: 1,
+		asm:    x86.APMOVMSKB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 2147418112}, // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
 			},
 			outputs: []outputInfo{
 				{0, 49135}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
@@ -21169,23 +21606,6 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:           "LDP",
-		auxType:        auxSymOff,
-		argLen:         2,
-		faultOnNilArg0: true,
-		symEffect:      SymRead,
-		asm:            arm64.ALDP,
-		reg: regInfo{
-			inputs: []inputInfo{
-				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
-			},
-			outputs: []outputInfo{
-				{0, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
-				{1, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
-			},
-		},
-	},
-	{
 		name:           "FMOVSload",
 		auxType:        auxSymOff,
 		argLen:         2,
@@ -21214,6 +21634,91 @@ var opcodeTable = [...]opInfo{
 			},
 			outputs: []outputInfo{
 				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:           "LDP",
+		auxType:        auxSymOff,
+		argLen:         2,
+		faultOnNilArg0: true,
+		symEffect:      SymRead,
+		asm:            arm64.ALDP,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{1, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+			},
+		},
+	},
+	{
+		name:           "LDPW",
+		auxType:        auxSymOff,
+		argLen:         2,
+		faultOnNilArg0: true,
+		symEffect:      SymRead,
+		asm:            arm64.ALDPW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{1, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+			},
+		},
+	},
+	{
+		name:           "LDPSW",
+		auxType:        auxSymOff,
+		argLen:         2,
+		faultOnNilArg0: true,
+		symEffect:      SymRead,
+		asm:            arm64.ALDPSW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{1, 805044223}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+			},
+		},
+	},
+	{
+		name:           "FLDPD",
+		auxType:        auxSymOff,
+		argLen:         2,
+		faultOnNilArg0: true,
+		symEffect:      SymRead,
+		asm:            arm64.AFLDPD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:           "FLDPS",
+		auxType:        auxSymOff,
+		argLen:         2,
+		faultOnNilArg0: true,
+		symEffect:      SymRead,
+		asm:            arm64.AFLDPS,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 		},
 	},
@@ -21498,21 +22003,6 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:           "STP",
-		auxType:        auxSymOff,
-		argLen:         4,
-		faultOnNilArg0: true,
-		symEffect:      SymWrite,
-		asm:            arm64.ASTP,
-		reg: regInfo{
-			inputs: []inputInfo{
-				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
-				{2, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
-				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
-			},
-		},
-	},
-	{
 		name:           "FMOVSstore",
 		auxType:        auxSymOff,
 		argLen:         3,
@@ -21537,6 +22027,66 @@ var opcodeTable = [...]opInfo{
 			inputs: []inputInfo{
 				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
 				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:           "STP",
+		auxType:        auxSymOff,
+		argLen:         4,
+		faultOnNilArg0: true,
+		symEffect:      SymWrite,
+		asm:            arm64.ASTP,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{2, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+		},
+	},
+	{
+		name:           "STPW",
+		auxType:        auxSymOff,
+		argLen:         4,
+		faultOnNilArg0: true,
+		symEffect:      SymWrite,
+		asm:            arm64.ASTPW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{2, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+		},
+	},
+	{
+		name:           "FSTPD",
+		auxType:        auxSymOff,
+		argLen:         4,
+		faultOnNilArg0: true,
+		symEffect:      SymWrite,
+		asm:            arm64.AFSTPD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:           "FSTPS",
+		auxType:        auxSymOff,
+		argLen:         4,
+		faultOnNilArg0: true,
+		symEffect:      SymWrite,
+		asm:            arm64.AFSTPS,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 		},
 	},
@@ -22806,6 +23356,23 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:            "LoweredAtomicExchange8",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
+			},
+		},
+	},
+	{
 		name:            "LoweredAtomicExchange64Variant",
 		argLen:          3,
 		resultNotInArgs: true,
@@ -22827,6 +23394,23 @@ var opcodeTable = [...]opInfo{
 		resultNotInArgs: true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicExchange8Variant",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
@@ -22983,24 +23567,7 @@ var opcodeTable = [...]opInfo{
 		name:            "LoweredAtomicAnd8",
 		argLen:          3,
 		resultNotInArgs: true,
-		faultOnNilArg0:  true,
-		hasSideEffects:  true,
-		unsafePoint:     true,
-		asm:             arm64.AAND,
-		reg: regInfo{
-			inputs: []inputInfo{
-				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
-				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
-			},
-			outputs: []outputInfo{
-				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
-			},
-		},
-	},
-	{
-		name:            "LoweredAtomicAnd32",
-		argLen:          3,
-		resultNotInArgs: true,
+		needIntTemp:     true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
 		unsafePoint:     true,
@@ -23019,6 +23586,7 @@ var opcodeTable = [...]opInfo{
 		name:            "LoweredAtomicOr8",
 		argLen:          3,
 		resultNotInArgs: true,
+		needIntTemp:     true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
 		unsafePoint:     true,
@@ -23034,9 +23602,67 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:            "LoweredAtomicAnd64",
+		argLen:          3,
+		resultNotInArgs: true,
+		needIntTemp:     true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		asm:             arm64.AAND,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicOr64",
+		argLen:          3,
+		resultNotInArgs: true,
+		needIntTemp:     true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		asm:             arm64.AORR,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd32",
+		argLen:          3,
+		resultNotInArgs: true,
+		needIntTemp:     true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		asm:             arm64.AAND,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
+			},
+		},
+	},
+	{
 		name:            "LoweredAtomicOr32",
 		argLen:          3,
 		resultNotInArgs: true,
+		needIntTemp:     true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
 		unsafePoint:     true,
@@ -23069,7 +23695,23 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:            "LoweredAtomicAnd32Variant",
+		name:            "LoweredAtomicOr8Variant",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd64Variant",
 		argLen:          3,
 		resultNotInArgs: true,
 		faultOnNilArg0:  true,
@@ -23086,11 +23728,28 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:            "LoweredAtomicOr8Variant",
+		name:            "LoweredAtomicOr64Variant",
 		argLen:          3,
 		resultNotInArgs: true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
+				{0, 9223372038733561855}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30 SP SB
+			},
+			outputs: []outputInfo{
+				{0, 670826495}, // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 R30
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd32Variant",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{1, 805044223},           // R0 R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R19 R20 R21 R22 R23 R24 R25 R26 g R30
@@ -23186,6 +23845,252 @@ var opcodeTable = [...]opInfo{
 		reg:            regInfo{},
 	},
 
+	{
+		name:   "NEGV",
+		argLen: 1,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "NEGF",
+		argLen: 1,
+		asm:    loong64.ANEGF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "NEGD",
+		argLen: 1,
+		asm:    loong64.ANEGD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "SQRTD",
+		argLen: 1,
+		asm:    loong64.ASQRTD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "SQRTF",
+		argLen: 1,
+		asm:    loong64.ASQRTF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "ABSD",
+		argLen: 1,
+		asm:    loong64.AABSD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "CLZW",
+		argLen: 1,
+		asm:    loong64.ACLZW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "CLZV",
+		argLen: 1,
+		asm:    loong64.ACLZV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "CTZW",
+		argLen: 1,
+		asm:    loong64.ACTZW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "CTZV",
+		argLen: 1,
+		asm:    loong64.ACTZV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "REVB2H",
+		argLen: 1,
+		asm:    loong64.AREVB2H,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "REVB2W",
+		argLen: 1,
+		asm:    loong64.AREVB2W,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "REVBV",
+		argLen: 1,
+		asm:    loong64.AREVBV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "BITREV4B",
+		argLen: 1,
+		asm:    loong64.ABITREV4B,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "BITREVW",
+		argLen: 1,
+		asm:    loong64.ABITREVW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "BITREVV",
+		argLen: 1,
+		asm:    loong64.ABITREVV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "VPCNT64",
+		argLen: 1,
+		asm:    loong64.AVPCNTV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "VPCNT32",
+		argLen: 1,
+		asm:    loong64.AVPCNTW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "VPCNT16",
+		argLen: 1,
+		asm:    loong64.AVPCNTH,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
 	{
 		name:        "ADDV",
 		argLen:      2,
@@ -23577,24 +24482,15 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:   "NEGV",
-		argLen: 1,
-		reg: regInfo{
-			inputs: []inputInfo{
-				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
-			},
-			outputs: []outputInfo{
-				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
-			},
-		},
-	},
-	{
-		name:   "NEGF",
-		argLen: 1,
-		asm:    loong64.ANEGF,
+		name:        "FMADDF",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFMADDF,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 			outputs: []outputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
@@ -23602,12 +24498,15 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:   "NEGD",
-		argLen: 1,
-		asm:    loong64.ANEGD,
+		name:        "FMADDD",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFMADDD,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 			outputs: []outputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
@@ -23615,12 +24514,15 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:   "SQRTD",
-		argLen: 1,
-		asm:    loong64.ASQRTD,
+		name:        "FMSUBF",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFMSUBF,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 			outputs: []outputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
@@ -23628,12 +24530,143 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:   "SQRTF",
-		argLen: 1,
-		asm:    loong64.ASQRTF,
+		name:        "FMSUBD",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFMSUBD,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:        "FNMADDF",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFNMADDF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:        "FNMADDD",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFNMADDD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:        "FNMSUBF",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFNMSUBF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:        "FNMSUBD",
+		argLen:      3,
+		commutative: true,
+		asm:         loong64.AFNMSUBD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:            "FMINF",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             loong64.AFMINF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:            "FMIND",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             loong64.AFMIND,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:            "FMAXF",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             loong64.AFMAXF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:            "FMAXD",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             loong64.AFMAXD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 			outputs: []outputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
@@ -23669,6 +24702,34 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "FCOPYSGD",
+		argLen: 2,
+		asm:    loong64.AFCOPYSGD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "SLL",
+		argLen: 2,
+		asm:    loong64.ASLL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{1, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
 		name:   "SLLV",
 		argLen: 2,
 		asm:    loong64.ASLLV,
@@ -23676,6 +24737,20 @@ var opcodeTable = [...]opInfo{
 			inputs: []inputInfo{
 				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 				{1, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:    "SLLconst",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     loong64.ASLL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 			},
 			outputs: []outputInfo{
 				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
@@ -23697,6 +24772,20 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "SRL",
+		argLen: 2,
+		asm:    loong64.ASRL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{1, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
 		name:   "SRLV",
 		argLen: 2,
 		asm:    loong64.ASRLV,
@@ -23704,6 +24793,20 @@ var opcodeTable = [...]opInfo{
 			inputs: []inputInfo{
 				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 				{1, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:    "SRLconst",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     loong64.ASRL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 			},
 			outputs: []outputInfo{
 				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
@@ -23725,6 +24828,20 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "SRA",
+		argLen: 2,
+		asm:    loong64.ASRA,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{1, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
 		name:   "SRAV",
 		argLen: 2,
 		asm:    loong64.ASRAV,
@@ -23732,6 +24849,20 @@ var opcodeTable = [...]opInfo{
 			inputs: []inputInfo{
 				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 				{1, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:    "SRAconst",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     loong64.ASRA,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 			},
 			outputs: []outputInfo{
 				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
@@ -23927,6 +25058,34 @@ var opcodeTable = [...]opInfo{
 			inputs: []inputInfo{
 				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 				{1, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:    "BSTRPICKW",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     loong64.ABSTRPICKW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:    "BSTRPICKV",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     loong64.ABSTRPICKV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073741816}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
 			},
 		},
 	},
@@ -24127,6 +25286,132 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "MOVVloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVWloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVWUloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVWU,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVHloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVH,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVHUloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVHU,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVBloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVBUloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVBU,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVFloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "MOVDloadidx",
+		argLen: 3,
+		asm:    loong64.AMOVD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
 		name:           "MOVBstore",
 		auxType:        auxSymOff,
 		argLen:         3,
@@ -24211,6 +25496,78 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "MOVBstoreidx",
+		argLen: 4,
+		asm:    loong64.AMOVB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{2, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVHstoreidx",
+		argLen: 4,
+		asm:    loong64.AMOVH,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{2, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVWstoreidx",
+		argLen: 4,
+		asm:    loong64.AMOVW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{2, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVVstoreidx",
+		argLen: 4,
+		asm:    loong64.AMOVV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{2, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVFstoreidx",
+		argLen: 4,
+		asm:    loong64.AMOVF,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "MOVDstoreidx",
+		argLen: 4,
+		asm:    loong64.AMOVD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+				{2, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
 		name:           "MOVBstorezero",
 		auxType:        auxSymOff,
 		argLen:         2,
@@ -24259,6 +25616,102 @@ var opcodeTable = [...]opInfo{
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVBstorezeroidx",
+		argLen: 3,
+		asm:    loong64.AMOVB,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVHstorezeroidx",
+		argLen: 3,
+		asm:    loong64.AMOVH,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVWstorezeroidx",
+		argLen: 3,
+		asm:    loong64.AMOVW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVVstorezeroidx",
+		argLen: 3,
+		asm:    loong64.AMOVV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:   "MOVWfpgp",
+		argLen: 1,
+		asm:    loong64.AMOVW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVWgpfp",
+		argLen: 1,
+		asm:    loong64.AMOVW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:   "MOVVfpgp",
+		argLen: 1,
+		asm:    loong64.AMOVV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:   "MOVVgpfp",
+		argLen: 1,
+		asm:    loong64.AMOVV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 		},
 	},
@@ -24497,6 +25950,32 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:         "LoweredRound32F",
+		argLen:       1,
+		resultInArg0: true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:         "LoweredRound64F",
+		argLen:       1,
+		resultInArg0: true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 4611686017353646080}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
 		name:         "CALLstatic",
 		auxType:      auxCallOff,
 		argLen:       -1,
@@ -24674,23 +26153,37 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:           "LoweredAtomicStorezero32",
-		argLen:         2,
+		name:           "LoweredAtomicStore8Variant",
+		argLen:         3,
 		faultOnNilArg0: true,
 		hasSideEffects: true,
 		reg: regInfo{
 			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
 			},
 		},
 	},
 	{
-		name:           "LoweredAtomicStorezero64",
-		argLen:         2,
+		name:           "LoweredAtomicStore32Variant",
+		argLen:         3,
 		faultOnNilArg0: true,
 		hasSideEffects: true,
 		reg: regInfo{
 			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+		},
+	},
+	{
+		name:           "LoweredAtomicStore64Variant",
+		argLen:         3,
+		faultOnNilArg0: true,
+		hasSideEffects: true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
 			},
 		},
@@ -24701,7 +26194,6 @@ var opcodeTable = [...]opInfo{
 		resultNotInArgs: true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
-		unsafePoint:     true,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
@@ -24718,7 +26210,22 @@ var opcodeTable = [...]opInfo{
 		resultNotInArgs: true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
-		unsafePoint:     true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicExchange8Variant",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
@@ -24735,7 +26242,6 @@ var opcodeTable = [...]opInfo{
 		resultNotInArgs: true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
-		unsafePoint:     true,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
@@ -24752,44 +26258,9 @@ var opcodeTable = [...]opInfo{
 		resultNotInArgs: true,
 		faultOnNilArg0:  true,
 		hasSideEffects:  true,
-		unsafePoint:     true,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
-				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
-			},
-			outputs: []outputInfo{
-				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
-			},
-		},
-	},
-	{
-		name:            "LoweredAtomicAddconst32",
-		auxType:         auxInt32,
-		argLen:          2,
-		resultNotInArgs: true,
-		faultOnNilArg0:  true,
-		hasSideEffects:  true,
-		unsafePoint:     true,
-		reg: regInfo{
-			inputs: []inputInfo{
-				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
-			},
-			outputs: []outputInfo{
-				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
-			},
-		},
-	},
-	{
-		name:            "LoweredAtomicAddconst64",
-		auxType:         auxInt64,
-		argLen:          2,
-		resultNotInArgs: true,
-		faultOnNilArg0:  true,
-		hasSideEffects:  true,
-		unsafePoint:     true,
-		reg: regInfo{
-			inputs: []inputInfo{
 				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
 			},
 			outputs: []outputInfo{
@@ -24826,6 +26297,144 @@ var opcodeTable = [...]opInfo{
 			inputs: []inputInfo{
 				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 				{2, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicCas64Variant",
+		argLen:          4,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{2, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicCas32Variant",
+		argLen:          4,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		unsafePoint:     true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{2, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd32",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		asm:             loong64.AAMANDDBW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicOr32",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		asm:             loong64.AAMORDBW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd32value",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		asm:             loong64.AAMANDDBW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicAnd64value",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		asm:             loong64.AAMANDDBV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicOr32value",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		asm:             loong64.AAMORDBW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
+				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
+			},
+			outputs: []outputInfo{
+				{0, 1071644664}, // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 R23 R24 R25 R26 R27 R28 R29 R31
+			},
+		},
+	},
+	{
+		name:            "LoweredAtomicOr64value",
+		argLen:          3,
+		resultNotInArgs: true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		asm:             loong64.AAMORDBV,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073741816},          // R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31
 				{0, 4611686019501129724}, // SP R4 R5 R6 R7 R8 R9 R10 R11 R12 R13 R14 R15 R16 R17 R18 R19 R20 R21 g R23 R24 R25 R26 R27 R28 R29 R31 SB
 			},
 			outputs: []outputInfo{
@@ -24903,6 +26512,13 @@ var opcodeTable = [...]opInfo{
 				{0, 268435456}, // R29
 			},
 		},
+	},
+	{
+		name:           "LoweredPubBarrier",
+		argLen:         1,
+		hasSideEffects: true,
+		asm:            loong64.ADBAR,
+		reg:            regInfo{},
 	},
 	{
 		name:    "LoweredPanicBoundsA",
@@ -28385,6 +30001,34 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "XSMINJDP",
+		argLen: 2,
+		asm:    ppc64.AXSMINJDP,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372032559808512}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30
+				{1, 9223372032559808512}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30
+			},
+			outputs: []outputInfo{
+				{0, 9223372032559808512}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30
+			},
+		},
+	},
+	{
+		name:   "XSMAXJDP",
+		argLen: 2,
+		asm:    ppc64.AXSMAXJDP,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372032559808512}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30
+				{1, 9223372032559808512}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30
+			},
+			outputs: []outputInfo{
+				{0, 9223372032559808512}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30
+			},
+		},
+	},
+	{
 		name:        "MULLD",
 		argLen:      2,
 		commutative: true,
@@ -28492,6 +30136,21 @@ var opcodeTable = [...]opInfo{
 		argLen:      2,
 		commutative: true,
 		asm:         ppc64.AMULHDU,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+				{1, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+			outputs: []outputInfo{
+				{0, 1073733624}, // R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+		},
+	},
+	{
+		name:        "MULHDUCC",
+		argLen:      2,
+		commutative: true,
+		asm:         ppc64.AMULHDUCC,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
@@ -28831,6 +30490,22 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "ADDZE",
+		argLen: 2,
+		asm:    ppc64.AADDZE,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 9223372036854775808}, // XER
+				{0, 1073733630},          // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+			clobbers: 9223372036854775808, // XER
+			outputs: []outputInfo{
+				{1, 9223372036854775808}, // XER
+				{0, 1073733624},          // R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+		},
+	},
+	{
 		name:   "SUBE",
 		argLen: 3,
 		asm:    ppc64.ASUBE,
@@ -29053,6 +30728,20 @@ var opcodeTable = [...]opInfo{
 		auxType: auxInt64,
 		argLen:  1,
 		asm:     ppc64.ARLDICL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+			outputs: []outputInfo{
+				{0, 1073733624}, // R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+		},
+	},
+	{
+		name:    "RLDICLCC",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     ppc64.ARLDICLCC,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
@@ -29817,6 +31506,21 @@ var opcodeTable = [...]opInfo{
 		auxType: auxInt64,
 		argLen:  1,
 		asm:     ppc64.AANDCC,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+			outputs: []outputInfo{
+				{0, 1073733624}, // R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+		},
+	},
+	{
+		name:         "ANDconst",
+		auxType:      auxInt64,
+		argLen:       1,
+		clobberFlags: true,
+		asm:          ppc64.AANDCC,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
@@ -31177,6 +32881,23 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:            "LoweredAtomicExchange8",
+		argLen:          3,
+		resultNotInArgs: true,
+		clobberFlags:    true,
+		faultOnNilArg0:  true,
+		hasSideEffects:  true,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, 1073733624}, // R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+				{0, 1073733630}, // SP SB R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+			outputs: []outputInfo{
+				{0, 1073733624}, // R3 R4 R5 R6 R7 R8 R9 R10 R11 R12 R14 R15 R16 R17 R18 R19 R20 R21 R22 R23 R24 R25 R26 R27 R28 R29
+			},
+		},
+	},
+	{
 		name:            "LoweredAtomicExchange32",
 		argLen:          3,
 		resultNotInArgs: true,
@@ -32042,6 +33763,20 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:   "SLLW",
+		argLen: 2,
+		asm:    riscv.ASLLW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
 		name:   "SRA",
 		argLen: 2,
 		asm:    riscv.ASRA,
@@ -32112,6 +33847,20 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:    "SLLIW",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     riscv.ASLLIW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
 		name:    "SRAI",
 		auxType: auxInt64,
 		argLen:  1,
@@ -32168,10 +33917,9 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:        "XOR",
-		argLen:      2,
-		commutative: true,
-		asm:         riscv.AXOR,
+		name:   "SH1ADD",
+		argLen: 2,
+		asm:    riscv.ASH1ADD,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -32183,24 +33931,9 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:    "XORI",
-		auxType: auxInt64,
-		argLen:  1,
-		asm:     riscv.AXORI,
-		reg: regInfo{
-			inputs: []inputInfo{
-				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
-			},
-			outputs: []outputInfo{
-				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
-			},
-		},
-	},
-	{
-		name:        "OR",
-		argLen:      2,
-		commutative: true,
-		asm:         riscv.AOR,
+		name:   "SH2ADD",
+		argLen: 2,
+		asm:    riscv.ASH2ADD,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -32212,13 +33945,13 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
-		name:    "ORI",
-		auxType: auxInt64,
-		argLen:  1,
-		asm:     riscv.AORI,
+		name:   "SH3ADD",
+		argLen: 2,
+		asm:    riscv.ASH3ADD,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
 			},
 			outputs: []outputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -32230,6 +33963,20 @@ var opcodeTable = [...]opInfo{
 		argLen:      2,
 		commutative: true,
 		asm:         riscv.AAND,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:   "ANDN",
+		argLen: 2,
+		asm:    riscv.AANDN,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -32261,6 +34008,237 @@ var opcodeTable = [...]opInfo{
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:        "OR",
+		argLen:      2,
+		commutative: true,
+		asm:         riscv.AOR,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:   "ORN",
+		argLen: 2,
+		asm:    riscv.AORN,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:    "ORI",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     riscv.AORI,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:   "ROL",
+		argLen: 2,
+		asm:    riscv.AROL,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:   "ROLW",
+		argLen: 2,
+		asm:    riscv.AROLW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:   "ROR",
+		argLen: 2,
+		asm:    riscv.AROR,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:    "RORI",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     riscv.ARORI,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:    "RORIW",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     riscv.ARORIW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:   "RORW",
+		argLen: 2,
+		asm:    riscv.ARORW,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:        "XNOR",
+		argLen:      2,
+		commutative: true,
+		asm:         riscv.AXNOR,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:        "XOR",
+		argLen:      2,
+		commutative: true,
+		asm:         riscv.AXOR,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:    "XORI",
+		auxType: auxInt64,
+		argLen:  1,
+		asm:     riscv.AXORI,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:        "MIN",
+		argLen:      2,
+		commutative: true,
+		asm:         riscv.AMIN,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:        "MAX",
+		argLen:      2,
+		commutative: true,
+		asm:         riscv.AMAX,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:        "MINU",
+		argLen:      2,
+		commutative: true,
+		asm:         riscv.AMINU,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+			outputs: []outputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:        "MAXU",
+		argLen:      2,
+		commutative: true,
+		asm:         riscv.AMAXU,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+				{1, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
 			},
 			outputs: []outputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -33073,6 +35051,38 @@ var opcodeTable = [...]opInfo{
 		},
 	},
 	{
+		name:            "LoweredFMAXS",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             riscv.AFMAXS,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:            "LoweredFMINS",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             riscv.AFMINS,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
 		name:        "FADDD",
 		argLen:      2,
 		commutative: true,
@@ -33423,6 +35433,38 @@ var opcodeTable = [...]opInfo{
 			},
 			outputs: []outputInfo{
 				{0, 1006632944}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
+			},
+		},
+	},
+	{
+		name:            "LoweredFMIND",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             riscv.AFMIND,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+		},
+	},
+	{
+		name:            "LoweredFMAXD",
+		argLen:          2,
+		commutative:     true,
+		resultNotInArgs: true,
+		asm:             riscv.AFMAXD,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+				{1, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
+			},
+			outputs: []outputInfo{
+				{0, 9223372034707292160}, // F0 F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 F13 F14 F15 F16 F17 F18 F19 F20 F21 F22 F23 F24 F25 F26 F27 F28 F29 F30 F31
 			},
 		},
 	},
@@ -39293,6 +41335,11 @@ var opcodeTable = [...]opInfo{
 		generic: true,
 	},
 	{
+		name:    "Ctz64On32",
+		argLen:  2,
+		generic: true,
+	},
+	{
 		name:    "Ctz8NonZero",
 		argLen:  1,
 		generic: true,
@@ -39449,6 +41496,26 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "Copysign",
+		argLen:  2,
+		generic: true,
+	},
+	{
+		name:    "Min64",
+		argLen:  2,
+		generic: true,
+	},
+	{
+		name:    "Max64",
+		argLen:  2,
+		generic: true,
+	},
+	{
+		name:    "Min64u",
+		argLen:  2,
+		generic: true,
+	},
+	{
+		name:    "Max64u",
 		argLen:  2,
 		generic: true,
 	},
@@ -40031,28 +42098,8 @@ var opcodeTable = [...]opInfo{
 		generic: true,
 	},
 	{
-		name:    "StructMake0",
-		argLen:  0,
-		generic: true,
-	},
-	{
-		name:    "StructMake1",
-		argLen:  1,
-		generic: true,
-	},
-	{
-		name:    "StructMake2",
-		argLen:  2,
-		generic: true,
-	},
-	{
-		name:    "StructMake3",
-		argLen:  3,
-		generic: true,
-	},
-	{
-		name:    "StructMake4",
-		argLen:  4,
+		name:    "StructMake",
+		argLen:  -1,
 		generic: true,
 	},
 	{
@@ -40336,6 +42383,12 @@ var opcodeTable = [...]opInfo{
 		generic:        true,
 	},
 	{
+		name:           "AtomicExchange8",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
 		name:           "AtomicExchange32",
 		argLen:         3,
 		hasSideEffects: true,
@@ -40384,19 +42437,73 @@ var opcodeTable = [...]opInfo{
 		generic:        true,
 	},
 	{
-		name:           "AtomicAnd32",
-		argLen:         3,
-		hasSideEffects: true,
-		generic:        true,
-	},
-	{
 		name:           "AtomicOr8",
 		argLen:         3,
 		hasSideEffects: true,
 		generic:        true,
 	},
 	{
+		name:           "AtomicAnd32",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
 		name:           "AtomicOr32",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicAnd64value",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicAnd32value",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicAnd8value",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicOr64value",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicOr32value",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicOr8value",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicStore8Variant",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicStore32Variant",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicStore64Variant",
 		argLen:         3,
 		hasSideEffects: true,
 		generic:        true,
@@ -40409,6 +42516,12 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "AtomicAdd64Variant",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicExchange8Variant",
 		argLen:         3,
 		hasSideEffects: true,
 		generic:        true,
@@ -40438,25 +42551,37 @@ var opcodeTable = [...]opInfo{
 		generic:        true,
 	},
 	{
-		name:           "AtomicAnd8Variant",
+		name:           "AtomicAnd64valueVariant",
 		argLen:         3,
 		hasSideEffects: true,
 		generic:        true,
 	},
 	{
-		name:           "AtomicAnd32Variant",
+		name:           "AtomicOr64valueVariant",
 		argLen:         3,
 		hasSideEffects: true,
 		generic:        true,
 	},
 	{
-		name:           "AtomicOr8Variant",
+		name:           "AtomicAnd32valueVariant",
 		argLen:         3,
 		hasSideEffects: true,
 		generic:        true,
 	},
 	{
-		name:           "AtomicOr32Variant",
+		name:           "AtomicOr32valueVariant",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicAnd8valueVariant",
+		argLen:         3,
+		hasSideEffects: true,
+		generic:        true,
+	},
+	{
+		name:           "AtomicOr8valueVariant",
 		argLen:         3,
 		hasSideEffects: true,
 		generic:        true,
@@ -40504,23 +42629,23 @@ func (o Op) UnsafePoint() bool    { return opcodeTable[o].unsafePoint }
 func (o Op) ResultInArg0() bool   { return opcodeTable[o].resultInArg0 }
 
 var registers386 = [...]Register{
-	{0, x86.REG_AX, 0, "AX"},
-	{1, x86.REG_CX, 1, "CX"},
-	{2, x86.REG_DX, 2, "DX"},
-	{3, x86.REG_BX, 3, "BX"},
-	{4, x86.REGSP, -1, "SP"},
-	{5, x86.REG_BP, 4, "BP"},
-	{6, x86.REG_SI, 5, "SI"},
-	{7, x86.REG_DI, 6, "DI"},
-	{8, x86.REG_X0, -1, "X0"},
-	{9, x86.REG_X1, -1, "X1"},
-	{10, x86.REG_X2, -1, "X2"},
-	{11, x86.REG_X3, -1, "X3"},
-	{12, x86.REG_X4, -1, "X4"},
-	{13, x86.REG_X5, -1, "X5"},
-	{14, x86.REG_X6, -1, "X6"},
-	{15, x86.REG_X7, -1, "X7"},
-	{16, 0, -1, "SB"},
+	{0, x86.REG_AX, "AX"},
+	{1, x86.REG_CX, "CX"},
+	{2, x86.REG_DX, "DX"},
+	{3, x86.REG_BX, "BX"},
+	{4, x86.REGSP, "SP"},
+	{5, x86.REG_BP, "BP"},
+	{6, x86.REG_SI, "SI"},
+	{7, x86.REG_DI, "DI"},
+	{8, x86.REG_X0, "X0"},
+	{9, x86.REG_X1, "X1"},
+	{10, x86.REG_X2, "X2"},
+	{11, x86.REG_X3, "X3"},
+	{12, x86.REG_X4, "X4"},
+	{13, x86.REG_X5, "X5"},
+	{14, x86.REG_X6, "X6"},
+	{15, x86.REG_X7, "X7"},
+	{16, 0, "SB"},
 }
 var paramIntReg386 = []int8(nil)
 var paramFloatReg386 = []int8(nil)
@@ -40530,39 +42655,39 @@ var specialRegMask386 = regMask(0)
 var framepointerReg386 = int8(5)
 var linkReg386 = int8(-1)
 var registersAMD64 = [...]Register{
-	{0, x86.REG_AX, 0, "AX"},
-	{1, x86.REG_CX, 1, "CX"},
-	{2, x86.REG_DX, 2, "DX"},
-	{3, x86.REG_BX, 3, "BX"},
-	{4, x86.REGSP, -1, "SP"},
-	{5, x86.REG_BP, 4, "BP"},
-	{6, x86.REG_SI, 5, "SI"},
-	{7, x86.REG_DI, 6, "DI"},
-	{8, x86.REG_R8, 7, "R8"},
-	{9, x86.REG_R9, 8, "R9"},
-	{10, x86.REG_R10, 9, "R10"},
-	{11, x86.REG_R11, 10, "R11"},
-	{12, x86.REG_R12, 11, "R12"},
-	{13, x86.REG_R13, 12, "R13"},
-	{14, x86.REGG, -1, "g"},
-	{15, x86.REG_R15, 13, "R15"},
-	{16, x86.REG_X0, -1, "X0"},
-	{17, x86.REG_X1, -1, "X1"},
-	{18, x86.REG_X2, -1, "X2"},
-	{19, x86.REG_X3, -1, "X3"},
-	{20, x86.REG_X4, -1, "X4"},
-	{21, x86.REG_X5, -1, "X5"},
-	{22, x86.REG_X6, -1, "X6"},
-	{23, x86.REG_X7, -1, "X7"},
-	{24, x86.REG_X8, -1, "X8"},
-	{25, x86.REG_X9, -1, "X9"},
-	{26, x86.REG_X10, -1, "X10"},
-	{27, x86.REG_X11, -1, "X11"},
-	{28, x86.REG_X12, -1, "X12"},
-	{29, x86.REG_X13, -1, "X13"},
-	{30, x86.REG_X14, -1, "X14"},
-	{31, x86.REG_X15, -1, "X15"},
-	{32, 0, -1, "SB"},
+	{0, x86.REG_AX, "AX"},
+	{1, x86.REG_CX, "CX"},
+	{2, x86.REG_DX, "DX"},
+	{3, x86.REG_BX, "BX"},
+	{4, x86.REGSP, "SP"},
+	{5, x86.REG_BP, "BP"},
+	{6, x86.REG_SI, "SI"},
+	{7, x86.REG_DI, "DI"},
+	{8, x86.REG_R8, "R8"},
+	{9, x86.REG_R9, "R9"},
+	{10, x86.REG_R10, "R10"},
+	{11, x86.REG_R11, "R11"},
+	{12, x86.REG_R12, "R12"},
+	{13, x86.REG_R13, "R13"},
+	{14, x86.REGG, "g"},
+	{15, x86.REG_R15, "R15"},
+	{16, x86.REG_X0, "X0"},
+	{17, x86.REG_X1, "X1"},
+	{18, x86.REG_X2, "X2"},
+	{19, x86.REG_X3, "X3"},
+	{20, x86.REG_X4, "X4"},
+	{21, x86.REG_X5, "X5"},
+	{22, x86.REG_X6, "X6"},
+	{23, x86.REG_X7, "X7"},
+	{24, x86.REG_X8, "X8"},
+	{25, x86.REG_X9, "X9"},
+	{26, x86.REG_X10, "X10"},
+	{27, x86.REG_X11, "X11"},
+	{28, x86.REG_X12, "X12"},
+	{29, x86.REG_X13, "X13"},
+	{30, x86.REG_X14, "X14"},
+	{31, x86.REG_X15, "X15"},
+	{32, 0, "SB"},
 }
 var paramIntRegAMD64 = []int8{0, 3, 1, 7, 6, 8, 9, 10, 11}
 var paramFloatRegAMD64 = []int8{16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30}
@@ -40572,39 +42697,39 @@ var specialRegMaskAMD64 = regMask(2147483648)
 var framepointerRegAMD64 = int8(5)
 var linkRegAMD64 = int8(-1)
 var registersARM = [...]Register{
-	{0, arm.REG_R0, 0, "R0"},
-	{1, arm.REG_R1, 1, "R1"},
-	{2, arm.REG_R2, 2, "R2"},
-	{3, arm.REG_R3, 3, "R3"},
-	{4, arm.REG_R4, 4, "R4"},
-	{5, arm.REG_R5, 5, "R5"},
-	{6, arm.REG_R6, 6, "R6"},
-	{7, arm.REG_R7, 7, "R7"},
-	{8, arm.REG_R8, 8, "R8"},
-	{9, arm.REG_R9, 9, "R9"},
-	{10, arm.REGG, -1, "g"},
-	{11, arm.REG_R11, -1, "R11"},
-	{12, arm.REG_R12, 10, "R12"},
-	{13, arm.REGSP, -1, "SP"},
-	{14, arm.REG_R14, 11, "R14"},
-	{15, arm.REG_R15, -1, "R15"},
-	{16, arm.REG_F0, -1, "F0"},
-	{17, arm.REG_F1, -1, "F1"},
-	{18, arm.REG_F2, -1, "F2"},
-	{19, arm.REG_F3, -1, "F3"},
-	{20, arm.REG_F4, -1, "F4"},
-	{21, arm.REG_F5, -1, "F5"},
-	{22, arm.REG_F6, -1, "F6"},
-	{23, arm.REG_F7, -1, "F7"},
-	{24, arm.REG_F8, -1, "F8"},
-	{25, arm.REG_F9, -1, "F9"},
-	{26, arm.REG_F10, -1, "F10"},
-	{27, arm.REG_F11, -1, "F11"},
-	{28, arm.REG_F12, -1, "F12"},
-	{29, arm.REG_F13, -1, "F13"},
-	{30, arm.REG_F14, -1, "F14"},
-	{31, arm.REG_F15, -1, "F15"},
-	{32, 0, -1, "SB"},
+	{0, arm.REG_R0, "R0"},
+	{1, arm.REG_R1, "R1"},
+	{2, arm.REG_R2, "R2"},
+	{3, arm.REG_R3, "R3"},
+	{4, arm.REG_R4, "R4"},
+	{5, arm.REG_R5, "R5"},
+	{6, arm.REG_R6, "R6"},
+	{7, arm.REG_R7, "R7"},
+	{8, arm.REG_R8, "R8"},
+	{9, arm.REG_R9, "R9"},
+	{10, arm.REGG, "g"},
+	{11, arm.REG_R11, "R11"},
+	{12, arm.REG_R12, "R12"},
+	{13, arm.REGSP, "SP"},
+	{14, arm.REG_R14, "R14"},
+	{15, arm.REG_R15, "R15"},
+	{16, arm.REG_F0, "F0"},
+	{17, arm.REG_F1, "F1"},
+	{18, arm.REG_F2, "F2"},
+	{19, arm.REG_F3, "F3"},
+	{20, arm.REG_F4, "F4"},
+	{21, arm.REG_F5, "F5"},
+	{22, arm.REG_F6, "F6"},
+	{23, arm.REG_F7, "F7"},
+	{24, arm.REG_F8, "F8"},
+	{25, arm.REG_F9, "F9"},
+	{26, arm.REG_F10, "F10"},
+	{27, arm.REG_F11, "F11"},
+	{28, arm.REG_F12, "F12"},
+	{29, arm.REG_F13, "F13"},
+	{30, arm.REG_F14, "F14"},
+	{31, arm.REG_F15, "F15"},
+	{32, 0, "SB"},
 }
 var paramIntRegARM = []int8(nil)
 var paramFloatRegARM = []int8(nil)
@@ -40614,70 +42739,70 @@ var specialRegMaskARM = regMask(0)
 var framepointerRegARM = int8(-1)
 var linkRegARM = int8(14)
 var registersARM64 = [...]Register{
-	{0, arm64.REG_R0, 0, "R0"},
-	{1, arm64.REG_R1, 1, "R1"},
-	{2, arm64.REG_R2, 2, "R2"},
-	{3, arm64.REG_R3, 3, "R3"},
-	{4, arm64.REG_R4, 4, "R4"},
-	{5, arm64.REG_R5, 5, "R5"},
-	{6, arm64.REG_R6, 6, "R6"},
-	{7, arm64.REG_R7, 7, "R7"},
-	{8, arm64.REG_R8, 8, "R8"},
-	{9, arm64.REG_R9, 9, "R9"},
-	{10, arm64.REG_R10, 10, "R10"},
-	{11, arm64.REG_R11, 11, "R11"},
-	{12, arm64.REG_R12, 12, "R12"},
-	{13, arm64.REG_R13, 13, "R13"},
-	{14, arm64.REG_R14, 14, "R14"},
-	{15, arm64.REG_R15, 15, "R15"},
-	{16, arm64.REG_R16, 16, "R16"},
-	{17, arm64.REG_R17, 17, "R17"},
-	{18, arm64.REG_R18, -1, "R18"},
-	{19, arm64.REG_R19, 18, "R19"},
-	{20, arm64.REG_R20, 19, "R20"},
-	{21, arm64.REG_R21, 20, "R21"},
-	{22, arm64.REG_R22, 21, "R22"},
-	{23, arm64.REG_R23, 22, "R23"},
-	{24, arm64.REG_R24, 23, "R24"},
-	{25, arm64.REG_R25, 24, "R25"},
-	{26, arm64.REG_R26, 25, "R26"},
-	{27, arm64.REGG, -1, "g"},
-	{28, arm64.REG_R29, -1, "R29"},
-	{29, arm64.REG_R30, 26, "R30"},
-	{30, arm64.REGSP, -1, "SP"},
-	{31, arm64.REG_F0, -1, "F0"},
-	{32, arm64.REG_F1, -1, "F1"},
-	{33, arm64.REG_F2, -1, "F2"},
-	{34, arm64.REG_F3, -1, "F3"},
-	{35, arm64.REG_F4, -1, "F4"},
-	{36, arm64.REG_F5, -1, "F5"},
-	{37, arm64.REG_F6, -1, "F6"},
-	{38, arm64.REG_F7, -1, "F7"},
-	{39, arm64.REG_F8, -1, "F8"},
-	{40, arm64.REG_F9, -1, "F9"},
-	{41, arm64.REG_F10, -1, "F10"},
-	{42, arm64.REG_F11, -1, "F11"},
-	{43, arm64.REG_F12, -1, "F12"},
-	{44, arm64.REG_F13, -1, "F13"},
-	{45, arm64.REG_F14, -1, "F14"},
-	{46, arm64.REG_F15, -1, "F15"},
-	{47, arm64.REG_F16, -1, "F16"},
-	{48, arm64.REG_F17, -1, "F17"},
-	{49, arm64.REG_F18, -1, "F18"},
-	{50, arm64.REG_F19, -1, "F19"},
-	{51, arm64.REG_F20, -1, "F20"},
-	{52, arm64.REG_F21, -1, "F21"},
-	{53, arm64.REG_F22, -1, "F22"},
-	{54, arm64.REG_F23, -1, "F23"},
-	{55, arm64.REG_F24, -1, "F24"},
-	{56, arm64.REG_F25, -1, "F25"},
-	{57, arm64.REG_F26, -1, "F26"},
-	{58, arm64.REG_F27, -1, "F27"},
-	{59, arm64.REG_F28, -1, "F28"},
-	{60, arm64.REG_F29, -1, "F29"},
-	{61, arm64.REG_F30, -1, "F30"},
-	{62, arm64.REG_F31, -1, "F31"},
-	{63, 0, -1, "SB"},
+	{0, arm64.REG_R0, "R0"},
+	{1, arm64.REG_R1, "R1"},
+	{2, arm64.REG_R2, "R2"},
+	{3, arm64.REG_R3, "R3"},
+	{4, arm64.REG_R4, "R4"},
+	{5, arm64.REG_R5, "R5"},
+	{6, arm64.REG_R6, "R6"},
+	{7, arm64.REG_R7, "R7"},
+	{8, arm64.REG_R8, "R8"},
+	{9, arm64.REG_R9, "R9"},
+	{10, arm64.REG_R10, "R10"},
+	{11, arm64.REG_R11, "R11"},
+	{12, arm64.REG_R12, "R12"},
+	{13, arm64.REG_R13, "R13"},
+	{14, arm64.REG_R14, "R14"},
+	{15, arm64.REG_R15, "R15"},
+	{16, arm64.REG_R16, "R16"},
+	{17, arm64.REG_R17, "R17"},
+	{18, arm64.REG_R18, "R18"},
+	{19, arm64.REG_R19, "R19"},
+	{20, arm64.REG_R20, "R20"},
+	{21, arm64.REG_R21, "R21"},
+	{22, arm64.REG_R22, "R22"},
+	{23, arm64.REG_R23, "R23"},
+	{24, arm64.REG_R24, "R24"},
+	{25, arm64.REG_R25, "R25"},
+	{26, arm64.REG_R26, "R26"},
+	{27, arm64.REGG, "g"},
+	{28, arm64.REG_R29, "R29"},
+	{29, arm64.REG_R30, "R30"},
+	{30, arm64.REGSP, "SP"},
+	{31, arm64.REG_F0, "F0"},
+	{32, arm64.REG_F1, "F1"},
+	{33, arm64.REG_F2, "F2"},
+	{34, arm64.REG_F3, "F3"},
+	{35, arm64.REG_F4, "F4"},
+	{36, arm64.REG_F5, "F5"},
+	{37, arm64.REG_F6, "F6"},
+	{38, arm64.REG_F7, "F7"},
+	{39, arm64.REG_F8, "F8"},
+	{40, arm64.REG_F9, "F9"},
+	{41, arm64.REG_F10, "F10"},
+	{42, arm64.REG_F11, "F11"},
+	{43, arm64.REG_F12, "F12"},
+	{44, arm64.REG_F13, "F13"},
+	{45, arm64.REG_F14, "F14"},
+	{46, arm64.REG_F15, "F15"},
+	{47, arm64.REG_F16, "F16"},
+	{48, arm64.REG_F17, "F17"},
+	{49, arm64.REG_F18, "F18"},
+	{50, arm64.REG_F19, "F19"},
+	{51, arm64.REG_F20, "F20"},
+	{52, arm64.REG_F21, "F21"},
+	{53, arm64.REG_F22, "F22"},
+	{54, arm64.REG_F23, "F23"},
+	{55, arm64.REG_F24, "F24"},
+	{56, arm64.REG_F25, "F25"},
+	{57, arm64.REG_F26, "F26"},
+	{58, arm64.REG_F27, "F27"},
+	{59, arm64.REG_F28, "F28"},
+	{60, arm64.REG_F29, "F29"},
+	{61, arm64.REG_F30, "F30"},
+	{62, arm64.REG_F31, "F31"},
+	{63, 0, "SB"},
 }
 var paramIntRegARM64 = []int8{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 var paramFloatRegARM64 = []int8{31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46}
@@ -40687,69 +42812,69 @@ var specialRegMaskARM64 = regMask(0)
 var framepointerRegARM64 = int8(-1)
 var linkRegARM64 = int8(29)
 var registersLOONG64 = [...]Register{
-	{0, loong64.REG_R0, -1, "R0"},
-	{1, loong64.REG_R1, -1, "R1"},
-	{2, loong64.REGSP, -1, "SP"},
-	{3, loong64.REG_R4, 0, "R4"},
-	{4, loong64.REG_R5, 1, "R5"},
-	{5, loong64.REG_R6, 2, "R6"},
-	{6, loong64.REG_R7, 3, "R7"},
-	{7, loong64.REG_R8, 4, "R8"},
-	{8, loong64.REG_R9, 5, "R9"},
-	{9, loong64.REG_R10, 6, "R10"},
-	{10, loong64.REG_R11, 7, "R11"},
-	{11, loong64.REG_R12, 8, "R12"},
-	{12, loong64.REG_R13, 9, "R13"},
-	{13, loong64.REG_R14, 10, "R14"},
-	{14, loong64.REG_R15, 11, "R15"},
-	{15, loong64.REG_R16, 12, "R16"},
-	{16, loong64.REG_R17, 13, "R17"},
-	{17, loong64.REG_R18, 14, "R18"},
-	{18, loong64.REG_R19, 15, "R19"},
-	{19, loong64.REG_R20, 16, "R20"},
-	{20, loong64.REG_R21, 17, "R21"},
-	{21, loong64.REGG, -1, "g"},
-	{22, loong64.REG_R23, 18, "R23"},
-	{23, loong64.REG_R24, 19, "R24"},
-	{24, loong64.REG_R25, 20, "R25"},
-	{25, loong64.REG_R26, 21, "R26"},
-	{26, loong64.REG_R27, 22, "R27"},
-	{27, loong64.REG_R28, 23, "R28"},
-	{28, loong64.REG_R29, 24, "R29"},
-	{29, loong64.REG_R31, 25, "R31"},
-	{30, loong64.REG_F0, -1, "F0"},
-	{31, loong64.REG_F1, -1, "F1"},
-	{32, loong64.REG_F2, -1, "F2"},
-	{33, loong64.REG_F3, -1, "F3"},
-	{34, loong64.REG_F4, -1, "F4"},
-	{35, loong64.REG_F5, -1, "F5"},
-	{36, loong64.REG_F6, -1, "F6"},
-	{37, loong64.REG_F7, -1, "F7"},
-	{38, loong64.REG_F8, -1, "F8"},
-	{39, loong64.REG_F9, -1, "F9"},
-	{40, loong64.REG_F10, -1, "F10"},
-	{41, loong64.REG_F11, -1, "F11"},
-	{42, loong64.REG_F12, -1, "F12"},
-	{43, loong64.REG_F13, -1, "F13"},
-	{44, loong64.REG_F14, -1, "F14"},
-	{45, loong64.REG_F15, -1, "F15"},
-	{46, loong64.REG_F16, -1, "F16"},
-	{47, loong64.REG_F17, -1, "F17"},
-	{48, loong64.REG_F18, -1, "F18"},
-	{49, loong64.REG_F19, -1, "F19"},
-	{50, loong64.REG_F20, -1, "F20"},
-	{51, loong64.REG_F21, -1, "F21"},
-	{52, loong64.REG_F22, -1, "F22"},
-	{53, loong64.REG_F23, -1, "F23"},
-	{54, loong64.REG_F24, -1, "F24"},
-	{55, loong64.REG_F25, -1, "F25"},
-	{56, loong64.REG_F26, -1, "F26"},
-	{57, loong64.REG_F27, -1, "F27"},
-	{58, loong64.REG_F28, -1, "F28"},
-	{59, loong64.REG_F29, -1, "F29"},
-	{60, loong64.REG_F30, -1, "F30"},
-	{61, loong64.REG_F31, -1, "F31"},
-	{62, 0, -1, "SB"},
+	{0, loong64.REG_R0, "R0"},
+	{1, loong64.REG_R1, "R1"},
+	{2, loong64.REGSP, "SP"},
+	{3, loong64.REG_R4, "R4"},
+	{4, loong64.REG_R5, "R5"},
+	{5, loong64.REG_R6, "R6"},
+	{6, loong64.REG_R7, "R7"},
+	{7, loong64.REG_R8, "R8"},
+	{8, loong64.REG_R9, "R9"},
+	{9, loong64.REG_R10, "R10"},
+	{10, loong64.REG_R11, "R11"},
+	{11, loong64.REG_R12, "R12"},
+	{12, loong64.REG_R13, "R13"},
+	{13, loong64.REG_R14, "R14"},
+	{14, loong64.REG_R15, "R15"},
+	{15, loong64.REG_R16, "R16"},
+	{16, loong64.REG_R17, "R17"},
+	{17, loong64.REG_R18, "R18"},
+	{18, loong64.REG_R19, "R19"},
+	{19, loong64.REG_R20, "R20"},
+	{20, loong64.REG_R21, "R21"},
+	{21, loong64.REGG, "g"},
+	{22, loong64.REG_R23, "R23"},
+	{23, loong64.REG_R24, "R24"},
+	{24, loong64.REG_R25, "R25"},
+	{25, loong64.REG_R26, "R26"},
+	{26, loong64.REG_R27, "R27"},
+	{27, loong64.REG_R28, "R28"},
+	{28, loong64.REG_R29, "R29"},
+	{29, loong64.REG_R31, "R31"},
+	{30, loong64.REG_F0, "F0"},
+	{31, loong64.REG_F1, "F1"},
+	{32, loong64.REG_F2, "F2"},
+	{33, loong64.REG_F3, "F3"},
+	{34, loong64.REG_F4, "F4"},
+	{35, loong64.REG_F5, "F5"},
+	{36, loong64.REG_F6, "F6"},
+	{37, loong64.REG_F7, "F7"},
+	{38, loong64.REG_F8, "F8"},
+	{39, loong64.REG_F9, "F9"},
+	{40, loong64.REG_F10, "F10"},
+	{41, loong64.REG_F11, "F11"},
+	{42, loong64.REG_F12, "F12"},
+	{43, loong64.REG_F13, "F13"},
+	{44, loong64.REG_F14, "F14"},
+	{45, loong64.REG_F15, "F15"},
+	{46, loong64.REG_F16, "F16"},
+	{47, loong64.REG_F17, "F17"},
+	{48, loong64.REG_F18, "F18"},
+	{49, loong64.REG_F19, "F19"},
+	{50, loong64.REG_F20, "F20"},
+	{51, loong64.REG_F21, "F21"},
+	{52, loong64.REG_F22, "F22"},
+	{53, loong64.REG_F23, "F23"},
+	{54, loong64.REG_F24, "F24"},
+	{55, loong64.REG_F25, "F25"},
+	{56, loong64.REG_F26, "F26"},
+	{57, loong64.REG_F27, "F27"},
+	{58, loong64.REG_F28, "F28"},
+	{59, loong64.REG_F29, "F29"},
+	{60, loong64.REG_F30, "F30"},
+	{61, loong64.REG_F31, "F31"},
+	{62, 0, "SB"},
 }
 var paramIntRegLOONG64 = []int8{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}
 var paramFloatRegLOONG64 = []int8{30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45}
@@ -40759,54 +42884,54 @@ var specialRegMaskLOONG64 = regMask(0)
 var framepointerRegLOONG64 = int8(-1)
 var linkRegLOONG64 = int8(1)
 var registersMIPS = [...]Register{
-	{0, mips.REG_R0, -1, "R0"},
-	{1, mips.REG_R1, 0, "R1"},
-	{2, mips.REG_R2, 1, "R2"},
-	{3, mips.REG_R3, 2, "R3"},
-	{4, mips.REG_R4, 3, "R4"},
-	{5, mips.REG_R5, 4, "R5"},
-	{6, mips.REG_R6, 5, "R6"},
-	{7, mips.REG_R7, 6, "R7"},
-	{8, mips.REG_R8, 7, "R8"},
-	{9, mips.REG_R9, 8, "R9"},
-	{10, mips.REG_R10, 9, "R10"},
-	{11, mips.REG_R11, 10, "R11"},
-	{12, mips.REG_R12, 11, "R12"},
-	{13, mips.REG_R13, 12, "R13"},
-	{14, mips.REG_R14, 13, "R14"},
-	{15, mips.REG_R15, 14, "R15"},
-	{16, mips.REG_R16, 15, "R16"},
-	{17, mips.REG_R17, 16, "R17"},
-	{18, mips.REG_R18, 17, "R18"},
-	{19, mips.REG_R19, 18, "R19"},
-	{20, mips.REG_R20, 19, "R20"},
-	{21, mips.REG_R21, 20, "R21"},
-	{22, mips.REG_R22, 21, "R22"},
-	{23, mips.REG_R24, 22, "R24"},
-	{24, mips.REG_R25, 23, "R25"},
-	{25, mips.REG_R28, 24, "R28"},
-	{26, mips.REGSP, -1, "SP"},
-	{27, mips.REGG, -1, "g"},
-	{28, mips.REG_R31, 25, "R31"},
-	{29, mips.REG_F0, -1, "F0"},
-	{30, mips.REG_F2, -1, "F2"},
-	{31, mips.REG_F4, -1, "F4"},
-	{32, mips.REG_F6, -1, "F6"},
-	{33, mips.REG_F8, -1, "F8"},
-	{34, mips.REG_F10, -1, "F10"},
-	{35, mips.REG_F12, -1, "F12"},
-	{36, mips.REG_F14, -1, "F14"},
-	{37, mips.REG_F16, -1, "F16"},
-	{38, mips.REG_F18, -1, "F18"},
-	{39, mips.REG_F20, -1, "F20"},
-	{40, mips.REG_F22, -1, "F22"},
-	{41, mips.REG_F24, -1, "F24"},
-	{42, mips.REG_F26, -1, "F26"},
-	{43, mips.REG_F28, -1, "F28"},
-	{44, mips.REG_F30, -1, "F30"},
-	{45, mips.REG_HI, -1, "HI"},
-	{46, mips.REG_LO, -1, "LO"},
-	{47, 0, -1, "SB"},
+	{0, mips.REG_R0, "R0"},
+	{1, mips.REG_R1, "R1"},
+	{2, mips.REG_R2, "R2"},
+	{3, mips.REG_R3, "R3"},
+	{4, mips.REG_R4, "R4"},
+	{5, mips.REG_R5, "R5"},
+	{6, mips.REG_R6, "R6"},
+	{7, mips.REG_R7, "R7"},
+	{8, mips.REG_R8, "R8"},
+	{9, mips.REG_R9, "R9"},
+	{10, mips.REG_R10, "R10"},
+	{11, mips.REG_R11, "R11"},
+	{12, mips.REG_R12, "R12"},
+	{13, mips.REG_R13, "R13"},
+	{14, mips.REG_R14, "R14"},
+	{15, mips.REG_R15, "R15"},
+	{16, mips.REG_R16, "R16"},
+	{17, mips.REG_R17, "R17"},
+	{18, mips.REG_R18, "R18"},
+	{19, mips.REG_R19, "R19"},
+	{20, mips.REG_R20, "R20"},
+	{21, mips.REG_R21, "R21"},
+	{22, mips.REG_R22, "R22"},
+	{23, mips.REG_R24, "R24"},
+	{24, mips.REG_R25, "R25"},
+	{25, mips.REG_R28, "R28"},
+	{26, mips.REGSP, "SP"},
+	{27, mips.REGG, "g"},
+	{28, mips.REG_R31, "R31"},
+	{29, mips.REG_F0, "F0"},
+	{30, mips.REG_F2, "F2"},
+	{31, mips.REG_F4, "F4"},
+	{32, mips.REG_F6, "F6"},
+	{33, mips.REG_F8, "F8"},
+	{34, mips.REG_F10, "F10"},
+	{35, mips.REG_F12, "F12"},
+	{36, mips.REG_F14, "F14"},
+	{37, mips.REG_F16, "F16"},
+	{38, mips.REG_F18, "F18"},
+	{39, mips.REG_F20, "F20"},
+	{40, mips.REG_F22, "F22"},
+	{41, mips.REG_F24, "F24"},
+	{42, mips.REG_F26, "F26"},
+	{43, mips.REG_F28, "F28"},
+	{44, mips.REG_F30, "F30"},
+	{45, mips.REG_HI, "HI"},
+	{46, mips.REG_LO, "LO"},
+	{47, 0, "SB"},
 }
 var paramIntRegMIPS = []int8(nil)
 var paramFloatRegMIPS = []int8(nil)
@@ -40816,69 +42941,69 @@ var specialRegMaskMIPS = regMask(105553116266496)
 var framepointerRegMIPS = int8(-1)
 var linkRegMIPS = int8(28)
 var registersMIPS64 = [...]Register{
-	{0, mips.REG_R0, -1, "R0"},
-	{1, mips.REG_R1, 0, "R1"},
-	{2, mips.REG_R2, 1, "R2"},
-	{3, mips.REG_R3, 2, "R3"},
-	{4, mips.REG_R4, 3, "R4"},
-	{5, mips.REG_R5, 4, "R5"},
-	{6, mips.REG_R6, 5, "R6"},
-	{7, mips.REG_R7, 6, "R7"},
-	{8, mips.REG_R8, 7, "R8"},
-	{9, mips.REG_R9, 8, "R9"},
-	{10, mips.REG_R10, 9, "R10"},
-	{11, mips.REG_R11, 10, "R11"},
-	{12, mips.REG_R12, 11, "R12"},
-	{13, mips.REG_R13, 12, "R13"},
-	{14, mips.REG_R14, 13, "R14"},
-	{15, mips.REG_R15, 14, "R15"},
-	{16, mips.REG_R16, 15, "R16"},
-	{17, mips.REG_R17, 16, "R17"},
-	{18, mips.REG_R18, 17, "R18"},
-	{19, mips.REG_R19, 18, "R19"},
-	{20, mips.REG_R20, 19, "R20"},
-	{21, mips.REG_R21, 20, "R21"},
-	{22, mips.REG_R22, 21, "R22"},
-	{23, mips.REG_R24, 22, "R24"},
-	{24, mips.REG_R25, 23, "R25"},
-	{25, mips.REGSP, -1, "SP"},
-	{26, mips.REGG, -1, "g"},
-	{27, mips.REG_R31, 24, "R31"},
-	{28, mips.REG_F0, -1, "F0"},
-	{29, mips.REG_F1, -1, "F1"},
-	{30, mips.REG_F2, -1, "F2"},
-	{31, mips.REG_F3, -1, "F3"},
-	{32, mips.REG_F4, -1, "F4"},
-	{33, mips.REG_F5, -1, "F5"},
-	{34, mips.REG_F6, -1, "F6"},
-	{35, mips.REG_F7, -1, "F7"},
-	{36, mips.REG_F8, -1, "F8"},
-	{37, mips.REG_F9, -1, "F9"},
-	{38, mips.REG_F10, -1, "F10"},
-	{39, mips.REG_F11, -1, "F11"},
-	{40, mips.REG_F12, -1, "F12"},
-	{41, mips.REG_F13, -1, "F13"},
-	{42, mips.REG_F14, -1, "F14"},
-	{43, mips.REG_F15, -1, "F15"},
-	{44, mips.REG_F16, -1, "F16"},
-	{45, mips.REG_F17, -1, "F17"},
-	{46, mips.REG_F18, -1, "F18"},
-	{47, mips.REG_F19, -1, "F19"},
-	{48, mips.REG_F20, -1, "F20"},
-	{49, mips.REG_F21, -1, "F21"},
-	{50, mips.REG_F22, -1, "F22"},
-	{51, mips.REG_F23, -1, "F23"},
-	{52, mips.REG_F24, -1, "F24"},
-	{53, mips.REG_F25, -1, "F25"},
-	{54, mips.REG_F26, -1, "F26"},
-	{55, mips.REG_F27, -1, "F27"},
-	{56, mips.REG_F28, -1, "F28"},
-	{57, mips.REG_F29, -1, "F29"},
-	{58, mips.REG_F30, -1, "F30"},
-	{59, mips.REG_F31, -1, "F31"},
-	{60, mips.REG_HI, -1, "HI"},
-	{61, mips.REG_LO, -1, "LO"},
-	{62, 0, -1, "SB"},
+	{0, mips.REG_R0, "R0"},
+	{1, mips.REG_R1, "R1"},
+	{2, mips.REG_R2, "R2"},
+	{3, mips.REG_R3, "R3"},
+	{4, mips.REG_R4, "R4"},
+	{5, mips.REG_R5, "R5"},
+	{6, mips.REG_R6, "R6"},
+	{7, mips.REG_R7, "R7"},
+	{8, mips.REG_R8, "R8"},
+	{9, mips.REG_R9, "R9"},
+	{10, mips.REG_R10, "R10"},
+	{11, mips.REG_R11, "R11"},
+	{12, mips.REG_R12, "R12"},
+	{13, mips.REG_R13, "R13"},
+	{14, mips.REG_R14, "R14"},
+	{15, mips.REG_R15, "R15"},
+	{16, mips.REG_R16, "R16"},
+	{17, mips.REG_R17, "R17"},
+	{18, mips.REG_R18, "R18"},
+	{19, mips.REG_R19, "R19"},
+	{20, mips.REG_R20, "R20"},
+	{21, mips.REG_R21, "R21"},
+	{22, mips.REG_R22, "R22"},
+	{23, mips.REG_R24, "R24"},
+	{24, mips.REG_R25, "R25"},
+	{25, mips.REGSP, "SP"},
+	{26, mips.REGG, "g"},
+	{27, mips.REG_R31, "R31"},
+	{28, mips.REG_F0, "F0"},
+	{29, mips.REG_F1, "F1"},
+	{30, mips.REG_F2, "F2"},
+	{31, mips.REG_F3, "F3"},
+	{32, mips.REG_F4, "F4"},
+	{33, mips.REG_F5, "F5"},
+	{34, mips.REG_F6, "F6"},
+	{35, mips.REG_F7, "F7"},
+	{36, mips.REG_F8, "F8"},
+	{37, mips.REG_F9, "F9"},
+	{38, mips.REG_F10, "F10"},
+	{39, mips.REG_F11, "F11"},
+	{40, mips.REG_F12, "F12"},
+	{41, mips.REG_F13, "F13"},
+	{42, mips.REG_F14, "F14"},
+	{43, mips.REG_F15, "F15"},
+	{44, mips.REG_F16, "F16"},
+	{45, mips.REG_F17, "F17"},
+	{46, mips.REG_F18, "F18"},
+	{47, mips.REG_F19, "F19"},
+	{48, mips.REG_F20, "F20"},
+	{49, mips.REG_F21, "F21"},
+	{50, mips.REG_F22, "F22"},
+	{51, mips.REG_F23, "F23"},
+	{52, mips.REG_F24, "F24"},
+	{53, mips.REG_F25, "F25"},
+	{54, mips.REG_F26, "F26"},
+	{55, mips.REG_F27, "F27"},
+	{56, mips.REG_F28, "F28"},
+	{57, mips.REG_F29, "F29"},
+	{58, mips.REG_F30, "F30"},
+	{59, mips.REG_F31, "F31"},
+	{60, mips.REG_HI, "HI"},
+	{61, mips.REG_LO, "LO"},
+	{62, 0, "SB"},
 }
 var paramIntRegMIPS64 = []int8(nil)
 var paramFloatRegMIPS64 = []int8(nil)
@@ -40888,70 +43013,70 @@ var specialRegMaskMIPS64 = regMask(3458764513820540928)
 var framepointerRegMIPS64 = int8(-1)
 var linkRegMIPS64 = int8(27)
 var registersPPC64 = [...]Register{
-	{0, ppc64.REG_R0, -1, "R0"},
-	{1, ppc64.REGSP, -1, "SP"},
-	{2, 0, -1, "SB"},
-	{3, ppc64.REG_R3, 0, "R3"},
-	{4, ppc64.REG_R4, 1, "R4"},
-	{5, ppc64.REG_R5, 2, "R5"},
-	{6, ppc64.REG_R6, 3, "R6"},
-	{7, ppc64.REG_R7, 4, "R7"},
-	{8, ppc64.REG_R8, 5, "R8"},
-	{9, ppc64.REG_R9, 6, "R9"},
-	{10, ppc64.REG_R10, 7, "R10"},
-	{11, ppc64.REG_R11, 8, "R11"},
-	{12, ppc64.REG_R12, 9, "R12"},
-	{13, ppc64.REG_R13, -1, "R13"},
-	{14, ppc64.REG_R14, 10, "R14"},
-	{15, ppc64.REG_R15, 11, "R15"},
-	{16, ppc64.REG_R16, 12, "R16"},
-	{17, ppc64.REG_R17, 13, "R17"},
-	{18, ppc64.REG_R18, 14, "R18"},
-	{19, ppc64.REG_R19, 15, "R19"},
-	{20, ppc64.REG_R20, 16, "R20"},
-	{21, ppc64.REG_R21, 17, "R21"},
-	{22, ppc64.REG_R22, 18, "R22"},
-	{23, ppc64.REG_R23, 19, "R23"},
-	{24, ppc64.REG_R24, 20, "R24"},
-	{25, ppc64.REG_R25, 21, "R25"},
-	{26, ppc64.REG_R26, 22, "R26"},
-	{27, ppc64.REG_R27, 23, "R27"},
-	{28, ppc64.REG_R28, 24, "R28"},
-	{29, ppc64.REG_R29, 25, "R29"},
-	{30, ppc64.REGG, -1, "g"},
-	{31, ppc64.REG_R31, -1, "R31"},
-	{32, ppc64.REG_F0, -1, "F0"},
-	{33, ppc64.REG_F1, -1, "F1"},
-	{34, ppc64.REG_F2, -1, "F2"},
-	{35, ppc64.REG_F3, -1, "F3"},
-	{36, ppc64.REG_F4, -1, "F4"},
-	{37, ppc64.REG_F5, -1, "F5"},
-	{38, ppc64.REG_F6, -1, "F6"},
-	{39, ppc64.REG_F7, -1, "F7"},
-	{40, ppc64.REG_F8, -1, "F8"},
-	{41, ppc64.REG_F9, -1, "F9"},
-	{42, ppc64.REG_F10, -1, "F10"},
-	{43, ppc64.REG_F11, -1, "F11"},
-	{44, ppc64.REG_F12, -1, "F12"},
-	{45, ppc64.REG_F13, -1, "F13"},
-	{46, ppc64.REG_F14, -1, "F14"},
-	{47, ppc64.REG_F15, -1, "F15"},
-	{48, ppc64.REG_F16, -1, "F16"},
-	{49, ppc64.REG_F17, -1, "F17"},
-	{50, ppc64.REG_F18, -1, "F18"},
-	{51, ppc64.REG_F19, -1, "F19"},
-	{52, ppc64.REG_F20, -1, "F20"},
-	{53, ppc64.REG_F21, -1, "F21"},
-	{54, ppc64.REG_F22, -1, "F22"},
-	{55, ppc64.REG_F23, -1, "F23"},
-	{56, ppc64.REG_F24, -1, "F24"},
-	{57, ppc64.REG_F25, -1, "F25"},
-	{58, ppc64.REG_F26, -1, "F26"},
-	{59, ppc64.REG_F27, -1, "F27"},
-	{60, ppc64.REG_F28, -1, "F28"},
-	{61, ppc64.REG_F29, -1, "F29"},
-	{62, ppc64.REG_F30, -1, "F30"},
-	{63, ppc64.REG_XER, -1, "XER"},
+	{0, ppc64.REG_R0, "R0"},
+	{1, ppc64.REGSP, "SP"},
+	{2, 0, "SB"},
+	{3, ppc64.REG_R3, "R3"},
+	{4, ppc64.REG_R4, "R4"},
+	{5, ppc64.REG_R5, "R5"},
+	{6, ppc64.REG_R6, "R6"},
+	{7, ppc64.REG_R7, "R7"},
+	{8, ppc64.REG_R8, "R8"},
+	{9, ppc64.REG_R9, "R9"},
+	{10, ppc64.REG_R10, "R10"},
+	{11, ppc64.REG_R11, "R11"},
+	{12, ppc64.REG_R12, "R12"},
+	{13, ppc64.REG_R13, "R13"},
+	{14, ppc64.REG_R14, "R14"},
+	{15, ppc64.REG_R15, "R15"},
+	{16, ppc64.REG_R16, "R16"},
+	{17, ppc64.REG_R17, "R17"},
+	{18, ppc64.REG_R18, "R18"},
+	{19, ppc64.REG_R19, "R19"},
+	{20, ppc64.REG_R20, "R20"},
+	{21, ppc64.REG_R21, "R21"},
+	{22, ppc64.REG_R22, "R22"},
+	{23, ppc64.REG_R23, "R23"},
+	{24, ppc64.REG_R24, "R24"},
+	{25, ppc64.REG_R25, "R25"},
+	{26, ppc64.REG_R26, "R26"},
+	{27, ppc64.REG_R27, "R27"},
+	{28, ppc64.REG_R28, "R28"},
+	{29, ppc64.REG_R29, "R29"},
+	{30, ppc64.REGG, "g"},
+	{31, ppc64.REG_R31, "R31"},
+	{32, ppc64.REG_F0, "F0"},
+	{33, ppc64.REG_F1, "F1"},
+	{34, ppc64.REG_F2, "F2"},
+	{35, ppc64.REG_F3, "F3"},
+	{36, ppc64.REG_F4, "F4"},
+	{37, ppc64.REG_F5, "F5"},
+	{38, ppc64.REG_F6, "F6"},
+	{39, ppc64.REG_F7, "F7"},
+	{40, ppc64.REG_F8, "F8"},
+	{41, ppc64.REG_F9, "F9"},
+	{42, ppc64.REG_F10, "F10"},
+	{43, ppc64.REG_F11, "F11"},
+	{44, ppc64.REG_F12, "F12"},
+	{45, ppc64.REG_F13, "F13"},
+	{46, ppc64.REG_F14, "F14"},
+	{47, ppc64.REG_F15, "F15"},
+	{48, ppc64.REG_F16, "F16"},
+	{49, ppc64.REG_F17, "F17"},
+	{50, ppc64.REG_F18, "F18"},
+	{51, ppc64.REG_F19, "F19"},
+	{52, ppc64.REG_F20, "F20"},
+	{53, ppc64.REG_F21, "F21"},
+	{54, ppc64.REG_F22, "F22"},
+	{55, ppc64.REG_F23, "F23"},
+	{56, ppc64.REG_F24, "F24"},
+	{57, ppc64.REG_F25, "F25"},
+	{58, ppc64.REG_F26, "F26"},
+	{59, ppc64.REG_F27, "F27"},
+	{60, ppc64.REG_F28, "F28"},
+	{61, ppc64.REG_F29, "F29"},
+	{62, ppc64.REG_F30, "F30"},
+	{63, ppc64.REG_XER, "XER"},
 }
 var paramIntRegPPC64 = []int8{3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 17}
 var paramFloatRegPPC64 = []int8{33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44}
@@ -40961,70 +43086,70 @@ var specialRegMaskPPC64 = regMask(9223372036854775808)
 var framepointerRegPPC64 = int8(-1)
 var linkRegPPC64 = int8(-1)
 var registersRISCV64 = [...]Register{
-	{0, riscv.REG_X0, -1, "X0"},
-	{1, riscv.REGSP, -1, "SP"},
-	{2, riscv.REG_X3, -1, "X3"},
-	{3, riscv.REG_X4, -1, "X4"},
-	{4, riscv.REG_X5, 0, "X5"},
-	{5, riscv.REG_X6, 1, "X6"},
-	{6, riscv.REG_X7, 2, "X7"},
-	{7, riscv.REG_X8, 3, "X8"},
-	{8, riscv.REG_X9, 4, "X9"},
-	{9, riscv.REG_X10, 5, "X10"},
-	{10, riscv.REG_X11, 6, "X11"},
-	{11, riscv.REG_X12, 7, "X12"},
-	{12, riscv.REG_X13, 8, "X13"},
-	{13, riscv.REG_X14, 9, "X14"},
-	{14, riscv.REG_X15, 10, "X15"},
-	{15, riscv.REG_X16, 11, "X16"},
-	{16, riscv.REG_X17, 12, "X17"},
-	{17, riscv.REG_X18, 13, "X18"},
-	{18, riscv.REG_X19, 14, "X19"},
-	{19, riscv.REG_X20, 15, "X20"},
-	{20, riscv.REG_X21, 16, "X21"},
-	{21, riscv.REG_X22, 17, "X22"},
-	{22, riscv.REG_X23, 18, "X23"},
-	{23, riscv.REG_X24, 19, "X24"},
-	{24, riscv.REG_X25, 20, "X25"},
-	{25, riscv.REG_X26, 21, "X26"},
-	{26, riscv.REGG, -1, "g"},
-	{27, riscv.REG_X28, 22, "X28"},
-	{28, riscv.REG_X29, 23, "X29"},
-	{29, riscv.REG_X30, 24, "X30"},
-	{30, riscv.REG_X31, -1, "X31"},
-	{31, riscv.REG_F0, -1, "F0"},
-	{32, riscv.REG_F1, -1, "F1"},
-	{33, riscv.REG_F2, -1, "F2"},
-	{34, riscv.REG_F3, -1, "F3"},
-	{35, riscv.REG_F4, -1, "F4"},
-	{36, riscv.REG_F5, -1, "F5"},
-	{37, riscv.REG_F6, -1, "F6"},
-	{38, riscv.REG_F7, -1, "F7"},
-	{39, riscv.REG_F8, -1, "F8"},
-	{40, riscv.REG_F9, -1, "F9"},
-	{41, riscv.REG_F10, -1, "F10"},
-	{42, riscv.REG_F11, -1, "F11"},
-	{43, riscv.REG_F12, -1, "F12"},
-	{44, riscv.REG_F13, -1, "F13"},
-	{45, riscv.REG_F14, -1, "F14"},
-	{46, riscv.REG_F15, -1, "F15"},
-	{47, riscv.REG_F16, -1, "F16"},
-	{48, riscv.REG_F17, -1, "F17"},
-	{49, riscv.REG_F18, -1, "F18"},
-	{50, riscv.REG_F19, -1, "F19"},
-	{51, riscv.REG_F20, -1, "F20"},
-	{52, riscv.REG_F21, -1, "F21"},
-	{53, riscv.REG_F22, -1, "F22"},
-	{54, riscv.REG_F23, -1, "F23"},
-	{55, riscv.REG_F24, -1, "F24"},
-	{56, riscv.REG_F25, -1, "F25"},
-	{57, riscv.REG_F26, -1, "F26"},
-	{58, riscv.REG_F27, -1, "F27"},
-	{59, riscv.REG_F28, -1, "F28"},
-	{60, riscv.REG_F29, -1, "F29"},
-	{61, riscv.REG_F30, -1, "F30"},
-	{62, riscv.REG_F31, -1, "F31"},
-	{63, 0, -1, "SB"},
+	{0, riscv.REG_X0, "X0"},
+	{1, riscv.REGSP, "SP"},
+	{2, riscv.REG_X3, "X3"},
+	{3, riscv.REG_X4, "X4"},
+	{4, riscv.REG_X5, "X5"},
+	{5, riscv.REG_X6, "X6"},
+	{6, riscv.REG_X7, "X7"},
+	{7, riscv.REG_X8, "X8"},
+	{8, riscv.REG_X9, "X9"},
+	{9, riscv.REG_X10, "X10"},
+	{10, riscv.REG_X11, "X11"},
+	{11, riscv.REG_X12, "X12"},
+	{12, riscv.REG_X13, "X13"},
+	{13, riscv.REG_X14, "X14"},
+	{14, riscv.REG_X15, "X15"},
+	{15, riscv.REG_X16, "X16"},
+	{16, riscv.REG_X17, "X17"},
+	{17, riscv.REG_X18, "X18"},
+	{18, riscv.REG_X19, "X19"},
+	{19, riscv.REG_X20, "X20"},
+	{20, riscv.REG_X21, "X21"},
+	{21, riscv.REG_X22, "X22"},
+	{22, riscv.REG_X23, "X23"},
+	{23, riscv.REG_X24, "X24"},
+	{24, riscv.REG_X25, "X25"},
+	{25, riscv.REG_X26, "X26"},
+	{26, riscv.REGG, "g"},
+	{27, riscv.REG_X28, "X28"},
+	{28, riscv.REG_X29, "X29"},
+	{29, riscv.REG_X30, "X30"},
+	{30, riscv.REG_X31, "X31"},
+	{31, riscv.REG_F0, "F0"},
+	{32, riscv.REG_F1, "F1"},
+	{33, riscv.REG_F2, "F2"},
+	{34, riscv.REG_F3, "F3"},
+	{35, riscv.REG_F4, "F4"},
+	{36, riscv.REG_F5, "F5"},
+	{37, riscv.REG_F6, "F6"},
+	{38, riscv.REG_F7, "F7"},
+	{39, riscv.REG_F8, "F8"},
+	{40, riscv.REG_F9, "F9"},
+	{41, riscv.REG_F10, "F10"},
+	{42, riscv.REG_F11, "F11"},
+	{43, riscv.REG_F12, "F12"},
+	{44, riscv.REG_F13, "F13"},
+	{45, riscv.REG_F14, "F14"},
+	{46, riscv.REG_F15, "F15"},
+	{47, riscv.REG_F16, "F16"},
+	{48, riscv.REG_F17, "F17"},
+	{49, riscv.REG_F18, "F18"},
+	{50, riscv.REG_F19, "F19"},
+	{51, riscv.REG_F20, "F20"},
+	{52, riscv.REG_F21, "F21"},
+	{53, riscv.REG_F22, "F22"},
+	{54, riscv.REG_F23, "F23"},
+	{55, riscv.REG_F24, "F24"},
+	{56, riscv.REG_F25, "F25"},
+	{57, riscv.REG_F26, "F26"},
+	{58, riscv.REG_F27, "F27"},
+	{59, riscv.REG_F28, "F28"},
+	{60, riscv.REG_F29, "F29"},
+	{61, riscv.REG_F30, "F30"},
+	{62, riscv.REG_F31, "F31"},
+	{63, 0, "SB"},
 }
 var paramIntRegRISCV64 = []int8{9, 10, 11, 12, 13, 14, 15, 16, 7, 8, 17, 18, 19, 20, 21, 22}
 var paramFloatRegRISCV64 = []int8{41, 42, 43, 44, 45, 46, 47, 48, 39, 40, 49, 50, 51, 52, 53, 54}
@@ -41034,39 +43159,39 @@ var specialRegMaskRISCV64 = regMask(0)
 var framepointerRegRISCV64 = int8(-1)
 var linkRegRISCV64 = int8(0)
 var registersS390X = [...]Register{
-	{0, s390x.REG_R0, 0, "R0"},
-	{1, s390x.REG_R1, 1, "R1"},
-	{2, s390x.REG_R2, 2, "R2"},
-	{3, s390x.REG_R3, 3, "R3"},
-	{4, s390x.REG_R4, 4, "R4"},
-	{5, s390x.REG_R5, 5, "R5"},
-	{6, s390x.REG_R6, 6, "R6"},
-	{7, s390x.REG_R7, 7, "R7"},
-	{8, s390x.REG_R8, 8, "R8"},
-	{9, s390x.REG_R9, 9, "R9"},
-	{10, s390x.REG_R10, -1, "R10"},
-	{11, s390x.REG_R11, 10, "R11"},
-	{12, s390x.REG_R12, 11, "R12"},
-	{13, s390x.REGG, -1, "g"},
-	{14, s390x.REG_R14, 12, "R14"},
-	{15, s390x.REGSP, -1, "SP"},
-	{16, s390x.REG_F0, -1, "F0"},
-	{17, s390x.REG_F1, -1, "F1"},
-	{18, s390x.REG_F2, -1, "F2"},
-	{19, s390x.REG_F3, -1, "F3"},
-	{20, s390x.REG_F4, -1, "F4"},
-	{21, s390x.REG_F5, -1, "F5"},
-	{22, s390x.REG_F6, -1, "F6"},
-	{23, s390x.REG_F7, -1, "F7"},
-	{24, s390x.REG_F8, -1, "F8"},
-	{25, s390x.REG_F9, -1, "F9"},
-	{26, s390x.REG_F10, -1, "F10"},
-	{27, s390x.REG_F11, -1, "F11"},
-	{28, s390x.REG_F12, -1, "F12"},
-	{29, s390x.REG_F13, -1, "F13"},
-	{30, s390x.REG_F14, -1, "F14"},
-	{31, s390x.REG_F15, -1, "F15"},
-	{32, 0, -1, "SB"},
+	{0, s390x.REG_R0, "R0"},
+	{1, s390x.REG_R1, "R1"},
+	{2, s390x.REG_R2, "R2"},
+	{3, s390x.REG_R3, "R3"},
+	{4, s390x.REG_R4, "R4"},
+	{5, s390x.REG_R5, "R5"},
+	{6, s390x.REG_R6, "R6"},
+	{7, s390x.REG_R7, "R7"},
+	{8, s390x.REG_R8, "R8"},
+	{9, s390x.REG_R9, "R9"},
+	{10, s390x.REG_R10, "R10"},
+	{11, s390x.REG_R11, "R11"},
+	{12, s390x.REG_R12, "R12"},
+	{13, s390x.REGG, "g"},
+	{14, s390x.REG_R14, "R14"},
+	{15, s390x.REGSP, "SP"},
+	{16, s390x.REG_F0, "F0"},
+	{17, s390x.REG_F1, "F1"},
+	{18, s390x.REG_F2, "F2"},
+	{19, s390x.REG_F3, "F3"},
+	{20, s390x.REG_F4, "F4"},
+	{21, s390x.REG_F5, "F5"},
+	{22, s390x.REG_F6, "F6"},
+	{23, s390x.REG_F7, "F7"},
+	{24, s390x.REG_F8, "F8"},
+	{25, s390x.REG_F9, "F9"},
+	{26, s390x.REG_F10, "F10"},
+	{27, s390x.REG_F11, "F11"},
+	{28, s390x.REG_F12, "F12"},
+	{29, s390x.REG_F13, "F13"},
+	{30, s390x.REG_F14, "F14"},
+	{31, s390x.REG_F15, "F15"},
+	{32, 0, "SB"},
 }
 var paramIntRegS390X = []int8(nil)
 var paramFloatRegS390X = []int8(nil)
@@ -41076,57 +43201,57 @@ var specialRegMaskS390X = regMask(0)
 var framepointerRegS390X = int8(-1)
 var linkRegS390X = int8(14)
 var registersWasm = [...]Register{
-	{0, wasm.REG_R0, 0, "R0"},
-	{1, wasm.REG_R1, 1, "R1"},
-	{2, wasm.REG_R2, 2, "R2"},
-	{3, wasm.REG_R3, 3, "R3"},
-	{4, wasm.REG_R4, 4, "R4"},
-	{5, wasm.REG_R5, 5, "R5"},
-	{6, wasm.REG_R6, 6, "R6"},
-	{7, wasm.REG_R7, 7, "R7"},
-	{8, wasm.REG_R8, 8, "R8"},
-	{9, wasm.REG_R9, 9, "R9"},
-	{10, wasm.REG_R10, 10, "R10"},
-	{11, wasm.REG_R11, 11, "R11"},
-	{12, wasm.REG_R12, 12, "R12"},
-	{13, wasm.REG_R13, 13, "R13"},
-	{14, wasm.REG_R14, 14, "R14"},
-	{15, wasm.REG_R15, 15, "R15"},
-	{16, wasm.REG_F0, -1, "F0"},
-	{17, wasm.REG_F1, -1, "F1"},
-	{18, wasm.REG_F2, -1, "F2"},
-	{19, wasm.REG_F3, -1, "F3"},
-	{20, wasm.REG_F4, -1, "F4"},
-	{21, wasm.REG_F5, -1, "F5"},
-	{22, wasm.REG_F6, -1, "F6"},
-	{23, wasm.REG_F7, -1, "F7"},
-	{24, wasm.REG_F8, -1, "F8"},
-	{25, wasm.REG_F9, -1, "F9"},
-	{26, wasm.REG_F10, -1, "F10"},
-	{27, wasm.REG_F11, -1, "F11"},
-	{28, wasm.REG_F12, -1, "F12"},
-	{29, wasm.REG_F13, -1, "F13"},
-	{30, wasm.REG_F14, -1, "F14"},
-	{31, wasm.REG_F15, -1, "F15"},
-	{32, wasm.REG_F16, -1, "F16"},
-	{33, wasm.REG_F17, -1, "F17"},
-	{34, wasm.REG_F18, -1, "F18"},
-	{35, wasm.REG_F19, -1, "F19"},
-	{36, wasm.REG_F20, -1, "F20"},
-	{37, wasm.REG_F21, -1, "F21"},
-	{38, wasm.REG_F22, -1, "F22"},
-	{39, wasm.REG_F23, -1, "F23"},
-	{40, wasm.REG_F24, -1, "F24"},
-	{41, wasm.REG_F25, -1, "F25"},
-	{42, wasm.REG_F26, -1, "F26"},
-	{43, wasm.REG_F27, -1, "F27"},
-	{44, wasm.REG_F28, -1, "F28"},
-	{45, wasm.REG_F29, -1, "F29"},
-	{46, wasm.REG_F30, -1, "F30"},
-	{47, wasm.REG_F31, -1, "F31"},
-	{48, wasm.REGSP, -1, "SP"},
-	{49, wasm.REGG, -1, "g"},
-	{50, 0, -1, "SB"},
+	{0, wasm.REG_R0, "R0"},
+	{1, wasm.REG_R1, "R1"},
+	{2, wasm.REG_R2, "R2"},
+	{3, wasm.REG_R3, "R3"},
+	{4, wasm.REG_R4, "R4"},
+	{5, wasm.REG_R5, "R5"},
+	{6, wasm.REG_R6, "R6"},
+	{7, wasm.REG_R7, "R7"},
+	{8, wasm.REG_R8, "R8"},
+	{9, wasm.REG_R9, "R9"},
+	{10, wasm.REG_R10, "R10"},
+	{11, wasm.REG_R11, "R11"},
+	{12, wasm.REG_R12, "R12"},
+	{13, wasm.REG_R13, "R13"},
+	{14, wasm.REG_R14, "R14"},
+	{15, wasm.REG_R15, "R15"},
+	{16, wasm.REG_F0, "F0"},
+	{17, wasm.REG_F1, "F1"},
+	{18, wasm.REG_F2, "F2"},
+	{19, wasm.REG_F3, "F3"},
+	{20, wasm.REG_F4, "F4"},
+	{21, wasm.REG_F5, "F5"},
+	{22, wasm.REG_F6, "F6"},
+	{23, wasm.REG_F7, "F7"},
+	{24, wasm.REG_F8, "F8"},
+	{25, wasm.REG_F9, "F9"},
+	{26, wasm.REG_F10, "F10"},
+	{27, wasm.REG_F11, "F11"},
+	{28, wasm.REG_F12, "F12"},
+	{29, wasm.REG_F13, "F13"},
+	{30, wasm.REG_F14, "F14"},
+	{31, wasm.REG_F15, "F15"},
+	{32, wasm.REG_F16, "F16"},
+	{33, wasm.REG_F17, "F17"},
+	{34, wasm.REG_F18, "F18"},
+	{35, wasm.REG_F19, "F19"},
+	{36, wasm.REG_F20, "F20"},
+	{37, wasm.REG_F21, "F21"},
+	{38, wasm.REG_F22, "F22"},
+	{39, wasm.REG_F23, "F23"},
+	{40, wasm.REG_F24, "F24"},
+	{41, wasm.REG_F25, "F25"},
+	{42, wasm.REG_F26, "F26"},
+	{43, wasm.REG_F27, "F27"},
+	{44, wasm.REG_F28, "F28"},
+	{45, wasm.REG_F29, "F29"},
+	{46, wasm.REG_F30, "F30"},
+	{47, wasm.REG_F31, "F31"},
+	{48, wasm.REGSP, "SP"},
+	{49, wasm.REGG, "g"},
+	{50, 0, "SB"},
 }
 var paramIntRegWasm = []int8(nil)
 var paramFloatRegWasm = []int8(nil)

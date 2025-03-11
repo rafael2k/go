@@ -6,13 +6,21 @@ package testing_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"internal/race"
 	"internal/testenv"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // This is exactly what a test would do without a TestMain.
@@ -195,62 +203,175 @@ func TestSetenv(t *testing.T) {
 	}
 }
 
-func TestSetenvWithParallelAfterSetenv(t *testing.T) {
-	defer func() {
-		want := "testing: t.Parallel called after t.Setenv; cannot set environment variables in parallel tests"
-		if got := recover(); got != want {
-			t.Fatalf("expected panic; got %#v want %q", got, want)
-		}
-	}()
+func expectParallelConflict(t *testing.T) {
+	want := testing.ParallelConflict
+	if got := recover(); got != want {
+		t.Fatalf("expected panic; got %#v want %q", got, want)
+	}
+}
 
-	t.Setenv("GO_TEST_KEY_1", "value")
+func testWithParallelAfter(t *testing.T, fn func(*testing.T)) {
+	defer expectParallelConflict(t)
 
+	fn(t)
 	t.Parallel()
 }
 
-func TestSetenvWithParallelBeforeSetenv(t *testing.T) {
-	defer func() {
-		want := "testing: t.Setenv called after t.Parallel; cannot set environment variables in parallel tests"
-		if got := recover(); got != want {
-			t.Fatalf("expected panic; got %#v want %q", got, want)
-		}
-	}()
+func testWithParallelBefore(t *testing.T, fn func(*testing.T)) {
+	defer expectParallelConflict(t)
 
 	t.Parallel()
-
-	t.Setenv("GO_TEST_KEY_1", "value")
+	fn(t)
 }
 
-func TestSetenvWithParallelParentBeforeSetenv(t *testing.T) {
+func testWithParallelParentBefore(t *testing.T, fn func(*testing.T)) {
 	t.Parallel()
 
 	t.Run("child", func(t *testing.T) {
-		defer func() {
-			want := "testing: t.Setenv called after t.Parallel; cannot set environment variables in parallel tests"
-			if got := recover(); got != want {
-				t.Fatalf("expected panic; got %#v want %q", got, want)
-			}
-		}()
+		defer expectParallelConflict(t)
 
-		t.Setenv("GO_TEST_KEY_1", "value")
+		fn(t)
 	})
 }
 
-func TestSetenvWithParallelGrandParentBeforeSetenv(t *testing.T) {
+func testWithParallelGrandParentBefore(t *testing.T, fn func(*testing.T)) {
 	t.Parallel()
 
 	t.Run("child", func(t *testing.T) {
 		t.Run("grand-child", func(t *testing.T) {
-			defer func() {
-				want := "testing: t.Setenv called after t.Parallel; cannot set environment variables in parallel tests"
-				if got := recover(); got != want {
-					t.Fatalf("expected panic; got %#v want %q", got, want)
-				}
-			}()
+			defer expectParallelConflict(t)
 
-			t.Setenv("GO_TEST_KEY_1", "value")
+			fn(t)
 		})
 	})
+}
+
+func tSetenv(t *testing.T) {
+	t.Setenv("GO_TEST_KEY_1", "value")
+}
+
+func TestSetenvWithParallelAfter(t *testing.T) {
+	testWithParallelAfter(t, tSetenv)
+}
+
+func TestSetenvWithParallelBefore(t *testing.T) {
+	testWithParallelBefore(t, tSetenv)
+}
+
+func TestSetenvWithParallelParentBefore(t *testing.T) {
+	testWithParallelParentBefore(t, tSetenv)
+}
+
+func TestSetenvWithParallelGrandParentBefore(t *testing.T) {
+	testWithParallelGrandParentBefore(t, tSetenv)
+}
+
+func tChdir(t *testing.T) {
+	t.Chdir(t.TempDir())
+}
+
+func TestChdirWithParallelAfter(t *testing.T) {
+	testWithParallelAfter(t, tChdir)
+}
+
+func TestChdirWithParallelBefore(t *testing.T) {
+	testWithParallelBefore(t, tChdir)
+}
+
+func TestChdirWithParallelParentBefore(t *testing.T) {
+	testWithParallelParentBefore(t, tChdir)
+}
+
+func TestChdirWithParallelGrandParentBefore(t *testing.T) {
+	testWithParallelGrandParentBefore(t, tChdir)
+}
+
+func TestChdir(t *testing.T) {
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldDir)
+
+	// The "relative" test case relies on tmp not being a symlink.
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(oldDir, tmp)
+	if err != nil {
+		// If GOROOT is on C: volume and tmp is on the D: volume, there
+		// is no relative path between them, so skip that test case.
+		rel = "skip"
+	}
+
+	for _, tc := range []struct {
+		name, dir, pwd string
+		extraChdir     bool
+	}{
+		{
+			name: "absolute",
+			dir:  tmp,
+			pwd:  tmp,
+		},
+		{
+			name: "relative",
+			dir:  rel,
+			pwd:  tmp,
+		},
+		{
+			name: "current (absolute)",
+			dir:  oldDir,
+			pwd:  oldDir,
+		},
+		{
+			name: "current (relative) with extra os.Chdir",
+			dir:  ".",
+			pwd:  oldDir,
+
+			extraChdir: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.dir == "skip" {
+				t.Skipf("skipping test because there is no relative path between %s and %s", oldDir, tmp)
+			}
+			if !filepath.IsAbs(tc.pwd) {
+				t.Fatalf("Bad tc.pwd: %q (must be absolute)", tc.pwd)
+			}
+
+			t.Chdir(tc.dir)
+
+			newDir, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if newDir != tc.pwd {
+				t.Fatalf("failed to chdir to %q: getwd: got %q, want %q", tc.dir, newDir, tc.pwd)
+			}
+
+			switch runtime.GOOS {
+			case "windows", "plan9":
+				// Windows and Plan 9 do not use the PWD variable.
+			default:
+				if pwd := os.Getenv("PWD"); pwd != tc.pwd {
+					t.Fatalf("PWD: got %q, want %q", pwd, tc.pwd)
+				}
+			}
+
+			if tc.extraChdir {
+				os.Chdir("..")
+			}
+		})
+
+		newDir, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if newDir != oldDir {
+			t.Fatalf("failed to restore wd to %s: getwd: %s", oldDir, newDir)
+		}
+	}
 }
 
 // testingTrueInInit is part of TestTesting.
@@ -319,12 +440,7 @@ func runTest(t *testing.T, test string) []byte {
 
 	testenv.MustHaveExec(t)
 
-	exe, err := os.Executable()
-	if err != nil {
-		t.Skipf("can't find test executable: %v", err)
-	}
-
-	cmd := testenv.Command(t, exe, "-test.run=^"+test+"$", "-test.bench="+test, "-test.v", "-test.parallel=2", "-test.benchtime=2x")
+	cmd := testenv.Command(t, testenv.Executable(t), "-test.run=^"+test+"$", "-test.bench="+test, "-test.v", "-test.parallel=2", "-test.benchtime=2x")
 	cmd = testenv.CleanCmdEnv(cmd)
 	cmd.Env = append(cmd.Env, "GO_WANT_HELPER_PROCESS=1")
 	out, err := cmd.CombinedOutput()
@@ -553,14 +669,7 @@ func TestRaceBeforeParallel(t *testing.T) {
 }
 
 func TestRaceBeforeTests(t *testing.T) {
-	testenv.MustHaveExec(t)
-
-	exe, err := os.Executable()
-	if err != nil {
-		t.Skipf("can't find test executable: %v", err)
-	}
-
-	cmd := testenv.Command(t, exe, "-test.run=^$")
+	cmd := testenv.Command(t, testenv.Executable(t), "-test.run=^$")
 	cmd = testenv.CleanCmdEnv(cmd)
 	cmd.Env = append(cmd.Env, "GO_WANT_RACE_BEFORE_TESTS=1")
 	out, _ := cmd.CombinedOutput()
@@ -591,6 +700,20 @@ func TestBenchmarkRace(t *testing.T) {
 	}
 }
 
+func TestBenchmarkRaceBLoop(t *testing.T) {
+	out := runTest(t, "BenchmarkBLoopRacy")
+	c := bytes.Count(out, []byte("race detected during execution of test"))
+
+	want := 0
+	// We should see one race detector report.
+	if race.Enabled {
+		want = 1
+	}
+	if c != want {
+		t.Errorf("got %d race reports; want %d", c, want)
+	}
+}
+
 func BenchmarkRacy(b *testing.B) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		b.Skipf("skipping intentionally-racy benchmark")
@@ -600,15 +723,25 @@ func BenchmarkRacy(b *testing.B) {
 	}
 }
 
+func BenchmarkBLoopRacy(b *testing.B) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		b.Skipf("skipping intentionally-racy benchmark")
+	}
+	for b.Loop() {
+		doRace()
+	}
+}
+
 func TestBenchmarkSubRace(t *testing.T) {
 	out := runTest(t, "BenchmarkSubRacy")
 	c := bytes.Count(out, []byte("race detected during execution of test"))
 
 	want := 0
-	// We should see two race detector reports:
-	// one in the sub-bencmark, and one in the parent afterward.
+	// We should see 3 race detector reports:
+	// one in the sub-bencmark, one in the parent afterward,
+	// and one in b.Loop.
 	if race.Enabled {
-		want = 2
+		want = 3
 	}
 	if c != want {
 		t.Errorf("got %d race reports; want %d", c, want)
@@ -634,5 +767,265 @@ func BenchmarkSubRacy(b *testing.B) {
 		}
 	})
 
+	b.Run("racy-bLoop", func(b *testing.B) {
+		for b.Loop() {
+			doRace()
+		}
+	})
+
 	doRace() // should be reported separately
+}
+
+func TestRunningTests(t *testing.T) {
+	t.Parallel()
+
+	// Regression test for https://go.dev/issue/64404:
+	// on timeout, the "running tests" message should not include
+	// tests that are waiting on parked subtests.
+
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		for i := 0; i < 2; i++ {
+			t.Run(fmt.Sprintf("outer%d", i), func(t *testing.T) {
+				t.Parallel()
+				for j := 0; j < 2; j++ {
+					t.Run(fmt.Sprintf("inner%d", j), func(t *testing.T) {
+						t.Parallel()
+						for {
+							time.Sleep(1 * time.Millisecond)
+						}
+					})
+				}
+			})
+		}
+	}
+
+	timeout := 10 * time.Millisecond
+	for {
+		cmd := testenv.Command(t, testenv.Executable(t), "-test.run=^"+t.Name()+"$", "-test.timeout="+timeout.String(), "-test.parallel=4")
+		cmd.Env = append(cmd.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		out, err := cmd.CombinedOutput()
+		t.Logf("%v:\n%s", cmd, out)
+		if _, ok := err.(*exec.ExitError); !ok {
+			t.Fatal(err)
+		}
+
+		// Because the outer subtests (and TestRunningTests itself) are marked as
+		// parallel, their test functions return (and are no longer “running”)
+		// before the inner subtests are released to run and hang.
+		// Only those inner subtests should be reported as running.
+		want := []string{
+			"TestRunningTests/outer0/inner0",
+			"TestRunningTests/outer0/inner1",
+			"TestRunningTests/outer1/inner0",
+			"TestRunningTests/outer1/inner1",
+		}
+
+		got, ok := parseRunningTests(out)
+		if slices.Equal(got, want) {
+			break
+		}
+		if ok {
+			t.Logf("found running tests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		} else {
+			t.Logf("no running tests found")
+		}
+		t.Logf("retrying with longer timeout")
+		timeout *= 2
+	}
+}
+
+func TestRunningTestsInCleanup(t *testing.T) {
+	t.Parallel()
+
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
+		for i := 0; i < 2; i++ {
+			t.Run(fmt.Sprintf("outer%d", i), func(t *testing.T) {
+				// Not parallel: we expect to see only one outer test,
+				// stuck in cleanup after its subtest finishes.
+
+				t.Cleanup(func() {
+					for {
+						time.Sleep(1 * time.Millisecond)
+					}
+				})
+
+				for j := 0; j < 2; j++ {
+					t.Run(fmt.Sprintf("inner%d", j), func(t *testing.T) {
+						t.Parallel()
+					})
+				}
+			})
+		}
+	}
+
+	timeout := 10 * time.Millisecond
+	for {
+		cmd := testenv.Command(t, testenv.Executable(t), "-test.run=^"+t.Name()+"$", "-test.timeout="+timeout.String())
+		cmd.Env = append(cmd.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		out, err := cmd.CombinedOutput()
+		t.Logf("%v:\n%s", cmd, out)
+		if _, ok := err.(*exec.ExitError); !ok {
+			t.Fatal(err)
+		}
+
+		// TestRunningTestsInCleanup is blocked in the call to t.Run,
+		// but its test function has not yet returned so it should still
+		// be considered to be running.
+		// outer1 hasn't even started yet, so only outer0 and the top-level
+		// test function should be reported as running.
+		want := []string{
+			"TestRunningTestsInCleanup",
+			"TestRunningTestsInCleanup/outer0",
+		}
+
+		got, ok := parseRunningTests(out)
+		if slices.Equal(got, want) {
+			break
+		}
+		if ok {
+			t.Logf("found running tests:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		} else {
+			t.Logf("no running tests found")
+		}
+		t.Logf("retrying with longer timeout")
+		timeout *= 2
+	}
+}
+
+func parseRunningTests(out []byte) (runningTests []string, ok bool) {
+	inRunningTests := false
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if inRunningTests {
+			// Package testing adds one tab, the panic printer adds another.
+			if trimmed, ok := strings.CutPrefix(line, "\t\t"); ok {
+				if name, _, ok := strings.Cut(trimmed, " "); ok {
+					runningTests = append(runningTests, name)
+					continue
+				}
+			}
+
+			// This line is not the name of a running test.
+			return runningTests, true
+		}
+
+		if strings.TrimSpace(line) == "running tests:" {
+			inRunningTests = true
+		}
+	}
+
+	return nil, false
+}
+
+func TestConcurrentRun(t *testing.T) {
+	// Regression test for https://go.dev/issue/64402:
+	// this deadlocked after https://go.dev/cl/506755.
+
+	block := make(chan struct{})
+	var ready, done sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		ready.Add(1)
+		done.Add(1)
+		go t.Run("", func(*testing.T) {
+			ready.Done()
+			<-block
+			done.Done()
+		})
+	}
+	ready.Wait()
+	close(block)
+	done.Wait()
+}
+
+func TestParentRun(t1 *testing.T) {
+	// Regression test for https://go.dev/issue/64402:
+	// this deadlocked after https://go.dev/cl/506755.
+
+	t1.Run("outer", func(t2 *testing.T) {
+		t2.Log("Hello outer!")
+		t1.Run("not_inner", func(t3 *testing.T) { // Note: this is t1.Run, not t2.Run.
+			t3.Log("Hello inner!")
+		})
+	})
+}
+
+func TestContext(t *testing.T) {
+	ctx := t.Context()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("expected non-canceled context, got %v", err)
+	}
+
+	var innerCtx context.Context
+	t.Run("inner", func(t *testing.T) {
+		innerCtx = t.Context()
+		if err := innerCtx.Err(); err != nil {
+			t.Fatalf("expected inner test to not inherit canceled context, got %v", err)
+		}
+	})
+	t.Run("inner2", func(t *testing.T) {
+		if !errors.Is(innerCtx.Err(), context.Canceled) {
+			t.Fatal("expected context of sibling test to be canceled after its test function finished")
+		}
+	})
+
+	t.Cleanup(func() {
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatal("expected context canceled before cleanup")
+		}
+	})
+}
+
+func TestBenchmarkBLoopIterationCorrect(t *testing.T) {
+	out := runTest(t, "BenchmarkBLoopPrint")
+	c := bytes.Count(out, []byte("Printing from BenchmarkBLoopPrint"))
+
+	want := 2
+	if c != want {
+		t.Errorf("got %d loop iterations; want %d", c, want)
+	}
+
+	// b.Loop() will only rampup once.
+	c = bytes.Count(out, []byte("Ramping up from BenchmarkBLoopPrint"))
+	want = 1
+	if c != want {
+		t.Errorf("got %d loop rampup; want %d", c, want)
+	}
+
+	re := regexp.MustCompile(`BenchmarkBLoopPrint(-[0-9]+)?\s+2\s+[0-9]+\s+ns/op`)
+	if !re.Match(out) {
+		t.Error("missing benchmark output")
+	}
+}
+
+func TestBenchmarkBNIterationCorrect(t *testing.T) {
+	out := runTest(t, "BenchmarkBNPrint")
+	c := bytes.Count(out, []byte("Printing from BenchmarkBNPrint"))
+
+	// runTest sets benchtime=2x, with semantics specified in #32051 it should
+	// run 3 times.
+	want := 3
+	if c != want {
+		t.Errorf("got %d loop iterations; want %d", c, want)
+	}
+
+	// b.N style fixed iteration loop will rampup twice:
+	// One in run1(), the other in launch
+	c = bytes.Count(out, []byte("Ramping up from BenchmarkBNPrint"))
+	want = 2
+	if c != want {
+		t.Errorf("got %d loop rampup; want %d", c, want)
+	}
+}
+
+func BenchmarkBLoopPrint(b *testing.B) {
+	b.Logf("Ramping up from BenchmarkBLoopPrint")
+	for b.Loop() {
+		b.Logf("Printing from BenchmarkBLoopPrint")
+	}
+}
+
+func BenchmarkBNPrint(b *testing.B) {
+	b.Logf("Ramping up from BenchmarkBNPrint")
+	for i := 0; i < b.N; i++ {
+		b.Logf("Printing from BenchmarkBNPrint")
+	}
 }

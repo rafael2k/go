@@ -60,19 +60,23 @@ func check(t *testing.T, file string) {
 		if len(errors) == 0 {
 			t.Fatalf("cannot find ERROR HERE")
 		}
-		expect(t, file, errors)
+		expect(t, errors, file)
 	})
 }
 
-func expect(t *testing.T, file string, errors []*regexp.Regexp) {
+func expect(t *testing.T, errors []*regexp.Regexp, files ...string) {
 	dir, err := os.MkdirTemp("", filepath.Base(t.Name()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
 
-	dst := filepath.Join(dir, strings.TrimSuffix(file, ".go"))
-	cmd := exec.Command("go", "build", "-gcflags=-L -e", "-o="+dst, path(file)) // TODO(gri) no need for -gcflags=-L if go tool is adjusted
+	dst := filepath.Join(dir, strings.TrimSuffix(files[0], ".go"))
+	args := []string{"build", "-gcflags=-L -e", "-o=" + dst} // TODO(gri) no need for -gcflags=-L if go tool is adjusted
+	for _, file := range files {
+		args = append(args, path(file))
+	}
+	cmd := exec.Command(testenv.GoToolPath(t), args...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Errorf("expected cgo to fail but it succeeded")
@@ -101,7 +105,7 @@ func expect(t *testing.T, file string, errors []*regexp.Regexp) {
 func sizeofLongDouble(t *testing.T) int {
 	testenv.MustHaveGoRun(t)
 	testenv.MustHaveCGO(t)
-	cmd := exec.Command("go", "run", path("long_double_size.go"))
+	cmd := exec.Command(testenv.GoToolPath(t), "run", path("long_double_size.go"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%#q: %v:\n%s", strings.Join(cmd.Args, " "), err, out)
@@ -126,6 +130,9 @@ func TestReportsTypeErrors(t *testing.T) {
 		"issue28721.go",
 		"issue33061.go",
 		"issue50710.go",
+		"issue67517.go",
+		"issue67707.go",
+		"issue69176.go",
 	} {
 		check(t, file)
 	}
@@ -151,7 +158,7 @@ func TestToleratesOptimizationFlag(t *testing.T) {
 			testenv.MustHaveCGO(t)
 			t.Parallel()
 
-			cmd := exec.Command("go", "build", path("issue14669.go"))
+			cmd := exec.Command(testenv.GoToolPath(t), "build", path("issue14669.go"))
 			cmd.Env = append(os.Environ(), "CGO_CFLAGS="+cflags)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
@@ -166,7 +173,7 @@ func TestMallocCrashesOnNil(t *testing.T) {
 	testenv.MustHaveGoRun(t)
 	t.Parallel()
 
-	cmd := exec.Command("go", "run", path("malloc.go"))
+	cmd := exec.Command(testenv.GoToolPath(t), "run", path("malloc.go"))
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Logf("%#q:\n%s", strings.Join(cmd.Args, " "), out)
@@ -177,4 +184,14 @@ func TestMallocCrashesOnNil(t *testing.T) {
 func TestNotMatchedCFunction(t *testing.T) {
 	file := "notmatchedcfunction.go"
 	check(t, file)
+}
+
+func TestIncompatibleDeclarations(t *testing.T) {
+	testenv.MustHaveCGO(t)
+	testenv.MustHaveGoRun(t)
+	t.Parallel()
+	expect(t, []*regexp.Regexp{
+		regexp.MustCompile("inconsistent definitions for C[.]f"),
+		regexp.MustCompile("inconsistent definitions for C[.]g"),
+	}, "issue67699a.go", "issue67699b.go")
 }

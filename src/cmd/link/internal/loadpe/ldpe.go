@@ -493,17 +493,10 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, input *bio.Read
 			continue
 		}
 		if pesym.SectionNumber == IMAGE_SYM_ABSOLUTE && bytes.Equal(pesym.Name[:], []byte("@feat.00")) {
-			// Microsoft's linker looks at whether all input objects have an empty
-			// section called @feat.00. If all of them do, then it enables SEH;
-			// otherwise it doesn't enable that feature. So, since around the Windows
-			// XP SP2 era, most tools that make PE objects just tack on that section,
-			// so that it won't gimp Microsoft's linker logic. Go doesn't support SEH,
-			// so in theory, none of this really matters to us. But actually, if the
-			// linker tries to ingest an object with @feat.00 -- which are produced by
-			// LLVM's resource compiler, for example -- it chokes because of the
-			// IMAGE_SYM_ABSOLUTE section that it doesn't know how to deal with. Since
-			// @feat.00 is just a marking anyway, skip IMAGE_SYM_ABSOLUTE sections that
-			// are called @feat.00.
+			// The PE documentation says that, on x86 platforms, the absolute symbol named @feat.00
+			// is used to indicate that the COFF object supports SEH.
+			// Go doesn't support SEH on windows/386, so we can ignore this symbol.
+			// See https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#the-sxdata-section
 			continue
 		}
 		var sect *pe.Section
@@ -565,7 +558,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, input *bio.Read
 		l.AddInteriorSym(sectsym, s)
 		bld.SetValue(int64(pesym.Value))
 		bld.SetSize(4)
-		if l.SymType(sectsym) == sym.STEXT {
+		if l.SymType(sectsym).IsText() {
 			if bld.External() && !bld.DuplicateOK() {
 				return nil, fmt.Errorf("%s: duplicate symbol definition", l.SymName(s))
 			}
@@ -590,7 +583,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, input *bio.Read
 		}
 		l.SortSub(s)
 		importSymsState.secSyms = append(importSymsState.secSyms, s)
-		if l.SymType(s) == sym.STEXT {
+		if l.SymType(s).IsText() {
 			for ; s != 0; s = l.SubSym(s) {
 				if l.AttrOnList(s) {
 					return nil, fmt.Errorf("symbol %s listed multiple times", l.SymName(s))
@@ -640,7 +633,7 @@ func PostProcessImports() error {
 	arch := importSymsState.arch
 	keeprelocneeded := make(map[loader.Sym]loader.Sym)
 	for _, s := range importSymsState.secSyms {
-		isText := ldr.SymType(s) == sym.STEXT
+		isText := ldr.SymType(s).IsText()
 		relocs := ldr.Relocs(s)
 		for i := 0; i < relocs.Count(); i++ {
 			r := relocs.At(i)

@@ -104,7 +104,7 @@ var distInfo = map[OSArch]osArchInfo{
 	{"openbsd", "arm64"}:   {CgoSupported: true},
 	{"openbsd", "mips64"}:  {CgoSupported: true, Broken: true},
 	{"openbsd", "ppc64"}:   {},
-	{"openbsd", "riscv64"}: {Broken: true},
+	{"openbsd", "riscv64"}: {CgoSupported: true},
 	{"plan9", "386"}:       {},
 	{"plan9", "amd64"}:     {},
 	{"plan9", "arm"}:       {},
@@ -113,6 +113,6 @@ var distInfo = map[OSArch]osArchInfo{
 	{"wasip1", "wasm"}:     {},
 	{"windows", "386"}:     {CgoSupported: true, FirstClass: true},
 	{"windows", "amd64"}:   {CgoSupported: true, FirstClass: true},
-	{"windows", "arm"}:     {},
+	{"windows", "arm"}:     {Broken: true},
 	{"windows", "arm64"}:   {CgoSupported: true},
 }

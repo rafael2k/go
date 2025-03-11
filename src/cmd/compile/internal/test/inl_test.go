@@ -39,21 +39,20 @@ func TestIntendedInlining(t *testing.T) {
 			"adjustpointer",
 			"alignDown",
 			"alignUp",
-			"bucketMask",
-			"bucketShift",
 			"chanbuf",
-			"evacuated",
 			"fastlog2",
-			"fastrand",
 			"float64bits",
 			"funcspdelta",
 			"getm",
 			"getMCache",
+			"heapSetTypeNoHeader",
+			"heapSetTypeSmallHeader",
 			"isDirectIface",
 			"itabHashFunc",
 			"nextslicecap",
 			"noescape",
 			"pcvalueCacheKey",
+			"rand32",
 			"readUnaligned32",
 			"readUnaligned64",
 			"releasem",
@@ -62,9 +61,6 @@ func TestIntendedInlining(t *testing.T) {
 			"stringStructOf",
 			"subtract1",
 			"subtractb",
-			"tophash",
-			"(*bmap).keys",
-			"(*bmap).overflow",
 			"(*waitq).enqueue",
 			"funcInfo.entry",
 
@@ -72,7 +68,6 @@ func TestIntendedInlining(t *testing.T) {
 			"cgoInRange",
 			"gclinkptr.ptr",
 			"guintptr.ptr",
-			"writeHeapBitsForAddr",
 			"heapBitsSlice",
 			"markBits.isMarked",
 			"muintptr.ptr",
@@ -98,10 +93,6 @@ func TestIntendedInlining(t *testing.T) {
 			"traceLocker.ok",
 			"traceEnabled",
 		},
-		"runtime/internal/sys": {},
-		"runtime/internal/math": {
-			"MulUintptr",
-		},
 		"bytes": {
 			"(*Buffer).Bytes",
 			"(*Buffer).Cap",
@@ -118,6 +109,10 @@ func TestIntendedInlining(t *testing.T) {
 		"internal/abi": {
 			"UseInterfaceSwitchCache",
 		},
+		"internal/runtime/math": {
+			"MulUintptr",
+		},
+		"internal/runtime/sys": {},
 		"compress/flate": {
 			"byLiteral.Len",
 			"byLiteral.Less",
@@ -195,7 +190,7 @@ func TestIntendedInlining(t *testing.T) {
 			// Both OnceFunc and its returned closure need to be inlinable so
 			// that the returned closure can be inlined into the caller of OnceFunc.
 			"OnceFunc",
-			"OnceFunc.func2", // The returned closure.
+			"OnceFunc.func1", // The returned closure.
 			// TODO(austin): It would be good to check OnceValue and OnceValues,
 			// too, but currently they aren't reported because they have type
 			// parameters and aren't instantiated in sync.
@@ -237,24 +232,31 @@ func TestIntendedInlining(t *testing.T) {
 		},
 	}
 
+	if !goexperiment.SwissMap {
+		// Maps
+		want["runtime"] = append(want["runtime"], "bucketMask")
+		want["runtime"] = append(want["runtime"], "bucketShift")
+		want["runtime"] = append(want["runtime"], "evacuated")
+		want["runtime"] = append(want["runtime"], "tophash")
+		want["runtime"] = append(want["runtime"], "(*bmap).keys")
+		want["runtime"] = append(want["runtime"], "(*bmap).overflow")
+	}
 	if runtime.GOARCH != "386" && runtime.GOARCH != "loong64" && runtime.GOARCH != "mips64" && runtime.GOARCH != "mips64le" && runtime.GOARCH != "riscv64" {
 		// nextFreeFast calls sys.TrailingZeros64, which on 386 is implemented in asm and is not inlinable.
 		// We currently don't have midstack inlining so nextFreeFast is also not inlinable on 386.
 		// On loong64, mips64x and riscv64, TrailingZeros64 is not intrinsified and causes nextFreeFast
 		// too expensive to inline (Issue 22239).
 		want["runtime"] = append(want["runtime"], "nextFreeFast")
-		// Same behavior for heapBits.nextFast.
-		want["runtime"] = append(want["runtime"], "heapBits.nextFast")
 	}
 	if runtime.GOARCH != "386" {
 		// As explained above, TrailingZeros64 and TrailingZeros32 are not Go code on 386.
 		// The same applies to Bswap32.
-		want["runtime/internal/sys"] = append(want["runtime/internal/sys"], "TrailingZeros64")
-		want["runtime/internal/sys"] = append(want["runtime/internal/sys"], "TrailingZeros32")
-		want["runtime/internal/sys"] = append(want["runtime/internal/sys"], "Bswap32")
+		want["internal/runtime/sys"] = append(want["internal/runtime/sys"], "TrailingZeros64")
+		want["internal/runtime/sys"] = append(want["internal/runtime/sys"], "TrailingZeros32")
+		want["internal/runtime/sys"] = append(want["internal/runtime/sys"], "Bswap32")
 	}
 	if runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64" || runtime.GOARCH == "loong64" || runtime.GOARCH == "mips" || runtime.GOARCH == "mips64" || runtime.GOARCH == "ppc64" || runtime.GOARCH == "riscv64" || runtime.GOARCH == "s390x" {
-		// runtime/internal/atomic.Loaduintptr is only intrinsified on these platforms.
+		// internal/runtime/atomic.Loaduintptr is only intrinsified on these platforms.
 		want["runtime"] = append(want["runtime"], "traceAcquire")
 	}
 	if bits.UintSize == 64 {
@@ -373,10 +375,6 @@ func TestIssue56044(t *testing.T) {
 	if testing.Short() {
 		t.Skipf("skipping test: too long for short mode")
 	}
-	if !goexperiment.CoverageRedesign {
-		t.Skipf("skipping new coverage tests (experiment not enabled)")
-	}
-
 	testenv.MustHaveGoBuild(t)
 
 	modes := []string{"-covermode=set", "-covermode=atomic"}

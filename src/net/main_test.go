@@ -10,7 +10,7 @@ import (
 	"net/internal/socktest"
 	"os"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -185,7 +185,7 @@ func runningGoroutines() []string {
 	var gss []string
 	b := make([]byte, 2<<20)
 	b = b[:runtime.Stack(b, true)]
-	for _, s := range strings.Split(string(b), "\n\n") {
+	for s := range strings.SplitSeq(string(b), "\n\n") {
 		_, stack, _ := strings.Cut(s, "\n")
 		stack = strings.TrimSpace(stack)
 		if !strings.Contains(stack, "created by net") {
@@ -193,7 +193,7 @@ func runningGoroutines() []string {
 		}
 		gss = append(gss, stack)
 	}
-	sort.Strings(gss)
+	slices.Sort(gss)
 	return gss
 }
 

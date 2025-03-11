@@ -14,8 +14,8 @@ package runtime
 
 import (
 	"internal/goarch"
-	"runtime/internal/atomic"
-	"runtime/internal/sys"
+	"internal/runtime/atomic"
+	"internal/runtime/sys"
 	"unsafe"
 )
 
@@ -39,7 +39,7 @@ func startCheckmarks() {
 	assertWorldStopped()
 
 	// Clear all checkmarks.
-	for _, ai := range mheap_.allArenas {
+	clearCheckmarks := func(ai arenaIdx) {
 		arena := mheap_.arenas[ai.l1()][ai.l2()]
 		bitmap := arena.checkmarks
 
@@ -52,11 +52,16 @@ func startCheckmarks() {
 			arena.checkmarks = bitmap
 		} else {
 			// Otherwise clear the existing bitmap.
-			for i := range bitmap.b {
-				bitmap.b[i] = 0
-			}
+			clear(bitmap.b[:])
 		}
 	}
+	for _, ai := range mheap_.heapArenas {
+		clearCheckmarks(ai)
+	}
+	for _, ai := range mheap_.userArenaArenas {
+		clearCheckmarks(ai)
+	}
+
 	// Enable checkmarking.
 	useCheckmark = true
 }
@@ -90,8 +95,13 @@ func setCheckmark(obj, base, off uintptr, mbits markBits) bool {
 
 	ai := arenaIndex(obj)
 	arena := mheap_.arenas[ai.l1()][ai.l2()]
-	arenaWord := (obj / heapArenaBytes / 8) % uintptr(len(arena.checkmarks.b))
-	mask := byte(1 << ((obj / heapArenaBytes) % 8))
+	if arena == nil {
+		// Non-heap pointer.
+		return false
+	}
+	wordIdx := (obj - alignDown(obj, heapArenaBytes)) / goarch.PtrSize
+	arenaWord := wordIdx / 8
+	mask := byte(1 << (wordIdx % 8))
 	bytep := &arena.checkmarks.b[arenaWord]
 
 	if atomic.Load8(bytep)&mask != 0 {

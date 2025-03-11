@@ -5,6 +5,7 @@
 package slog
 
 import (
+	"bytes"
 	"context"
 	"log"
 	loginternal "log/internal"
@@ -53,7 +54,8 @@ func init() {
 // Default returns the default [Logger].
 func Default() *Logger { return defaultLogger.Load() }
 
-// SetDefault makes l the default [Logger].
+// SetDefault makes l the default [Logger], which is used by
+// the top-level functions [Info], [Debug] and so on.
 // After this call, output from the log package's default Logger
 // (as with [log.Print], etc.) will be logged using l's Handler,
 // at a level controlled by [SetLogLoggerLevel].
@@ -95,9 +97,7 @@ func (w *handlerWriter) Write(buf []byte) (int, error) {
 
 	// Remove final newline.
 	origLen := len(buf) // Report that the entire buf was written.
-	if len(buf) > 0 && buf[len(buf)-1] == '\n' {
-		buf = buf[:len(buf)-1]
-	}
+	buf = bytes.TrimSuffix(buf, []byte{'\n'})
 	r := NewRecord(time.Now(), level, string(buf), pc)
 	return origLen, w.h.Handle(context.Background(), r)
 }
@@ -145,7 +145,6 @@ func (l *Logger) WithGroup(name string) *Logger {
 	c := l.clone()
 	c.handler = l.handler.WithGroup(name)
 	return c
-
 }
 
 // New creates a new Logger with the given non-nil Handler.

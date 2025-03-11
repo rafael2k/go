@@ -371,8 +371,9 @@ bad_cpu: // show that the program requires a certain microarchitecture level.
 	CALL	runtime·abort(SB)
 	RET
 
-	// Prevent dead-code elimination of debugCallV2, which is
+	// Prevent dead-code elimination of debugCallV2 and debugPinnerV1, which are
 	// intended to be called by debuggers.
+	MOVQ	$runtime·debugPinnerV1<ABIInternal>(SB), AX
 	MOVQ	$runtime·debugCallV2<ABIInternal>(SB), AX
 	RET
 
@@ -411,11 +412,9 @@ TEXT gogo<>(SB), NOSPLIT, $0
 	MOVQ	DX, g(CX)
 	MOVQ	DX, R14		// set the g register
 	MOVQ	gobuf_sp(BX), SP	// restore SP
-	MOVQ	gobuf_ret(BX), AX
 	MOVQ	gobuf_ctxt(BX), DX
 	MOVQ	gobuf_bp(BX), BP
 	MOVQ	$0, gobuf_sp(BX)	// clear to help garbage collector
-	MOVQ	$0, gobuf_ret(BX)
 	MOVQ	$0, gobuf_ctxt(BX)
 	MOVQ	$0, gobuf_bp(BX)
 	MOVQ	gobuf_pc(BX), BX
@@ -456,6 +455,10 @@ goodm:
 	PUSHQ	AX	// open up space for fn's arg spill slot
 	MOVQ	0(DX), R12
 	CALL	R12		// fn(g)
+	// The Windows native stack unwinder incorrectly classifies the next instruction
+	// as part of the function epilogue, producing a wrong call stack.
+	// Add a NOP to work around this issue. See go.dev/issue/67007.
+	BYTE	$0x90
 	POPQ	AX
 	JMP	runtime·badmcall2(SB)
 	RET
@@ -823,7 +826,6 @@ TEXT gosave_systemstack_switch<>(SB),NOSPLIT|NOFRAME,$0
 	MOVQ	R9, (g_sched+gobuf_pc)(R14)
 	LEAQ	8(SP), R9
 	MOVQ	R9, (g_sched+gobuf_sp)(R14)
-	MOVQ	$0, (g_sched+gobuf_ret)(R14)
 	MOVQ	BP, (g_sched+gobuf_bp)(R14)
 	// Assert ctxt is zero. See func save.
 	MOVQ	(g_sched+gobuf_ctxt)(R14), R9
@@ -1673,11 +1675,6 @@ DATA shifts<>+0xe8(SB)/8, $0xffff0f0e0d0c0b0a
 DATA shifts<>+0xf0(SB)/8, $0x0807060504030201
 DATA shifts<>+0xf8(SB)/8, $0xff0f0e0d0c0b0a09
 GLOBL shifts<>(SB),RODATA,$256
-
-TEXT runtime·return0(SB), NOSPLIT, $0
-	MOVL	$0, AX
-	RET
-
 
 // Called from cgo wrappers, this function returns g->m->curg.stack.hi.
 // Must obey the gcc calling convention.

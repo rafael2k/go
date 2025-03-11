@@ -13,16 +13,11 @@ package syscall
 
 import (
 	"internal/itoa"
+	runtimesyscall "internal/runtime/syscall"
 	"runtime"
+	"slices"
 	"unsafe"
 )
-
-// N.B. RawSyscall6 is provided via linkname by runtime/internal/syscall.
-//
-// Errno is uintptr and thus compatible with the runtime/internal/syscall
-// definition.
-
-func RawSyscall6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err Errno)
 
 // Pull in entersyscall/exitsyscall for Syscall/Syscall6.
 //
@@ -40,8 +35,7 @@ func runtime_exitsyscall()
 // N.B. For the Syscall functions below:
 //
 // //go:uintptrkeepalive because the uintptr argument may be converted pointers
-// that need to be kept alive in the caller (this is implied for RawSyscall6
-// since it has no body).
+// that need to be kept alive in the caller.
 //
 // //go:nosplit because stack copying does not account for uintptrkeepalive, so
 // the stack must not grow. Stack copying cannot blindly assume that all
@@ -60,6 +54,17 @@ func runtime_exitsyscall()
 //go:linkname RawSyscall
 func RawSyscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
 	return RawSyscall6(trap, a1, a2, a3, 0, 0, 0)
+}
+
+//go:uintptrkeepalive
+//go:nosplit
+//go:norace
+//go:linkname RawSyscall6
+func RawSyscall6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err Errno) {
+	var errno uintptr
+	r1, r2, errno = runtimesyscall.Syscall6(trap, a1, a2, a3, a4, a5, a6)
+	err = Errno(errno)
+	return
 }
 
 //go:uintptrkeepalive
@@ -130,12 +135,7 @@ func isGroupMember(gid int) bool {
 		return false
 	}
 
-	for _, g := range groups {
-		if g == gid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(groups, gid)
 }
 
 func isCapDacOverrideSet() bool {
@@ -550,23 +550,29 @@ func (sa *SockaddrUnix) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	if n > len(sa.raw.Path) {
 		return nil, 0, EINVAL
 	}
-	if n == len(sa.raw.Path) && name[0] != '@' {
+	// Abstract addresses start with NUL.
+	// '@' is also a valid way to specify abstract addresses.
+	isAbstract := n > 0 && (name[0] == '@' || name[0] == '\x00')
+
+	// Non-abstract named addresses are NUL terminated.
+	// The length can't use the full capacity as we need to add NUL.
+	if n == len(sa.raw.Path) && !isAbstract {
 		return nil, 0, EINVAL
 	}
 	sa.raw.Family = AF_UNIX
 	for i := 0; i < n; i++ {
 		sa.raw.Path[i] = int8(name[i])
 	}
-	// length is family (uint16), name, NUL.
-	sl := _Socklen(2)
-	if n > 0 {
-		sl += _Socklen(n) + 1
-	}
-	if sa.raw.Path[0] == '@' || (sa.raw.Path[0] == 0 && sl > 3) {
-		// Check sl > 3 so we don't change unnamed socket behavior.
+	// Length is family + name (+ NUL if non-abstract).
+	// Family is of type uint16 (2 bytes).
+	sl := _Socklen(2 + n)
+	if isAbstract {
+		// Abstract addresses are not NUL terminated.
+		// We rewrite '@' prefix to NUL here.
 		sa.raw.Path[0] = 0
-		// Don't count trailing NUL for abstract address.
-		sl--
+	} else if n > 0 {
+		// Add NUL for non-abstract named addresses.
+		sl++
 	}
 
 	return unsafe.Pointer(&sa.raw), sl, nil
@@ -676,6 +682,10 @@ func anyToSockaddr(rsa *RawSockaddrAny) (Sockaddr, error) {
 		return sa, nil
 	}
 	return nil, EAFNOSUPPORT
+}
+
+func Accept(fd int) (nfd int, sa Sockaddr, err error) {
+	return Accept4(fd, 0)
 }
 
 func Accept4(fd int, flags int) (nfd int, sa Sockaddr, err error) {
@@ -1107,7 +1117,7 @@ func runtime_doAllThreadsSyscall(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, 
 //
 // AllThreadsSyscall is unaware of any threads that are launched
 // explicitly by cgo linked code, so the function always returns
-// ENOTSUP in binaries that use cgo.
+// [ENOTSUP] in binaries that use cgo.
 //
 //go:uintptrescapes
 func AllThreadsSyscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
@@ -1118,7 +1128,7 @@ func AllThreadsSyscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
 	return r1, r2, Errno(errno)
 }
 
-// AllThreadsSyscall6 is like AllThreadsSyscall, but extended to six
+// AllThreadsSyscall6 is like [AllThreadsSyscall], but extended to six
 // arguments.
 //
 //go:uintptrescapes
@@ -1280,12 +1290,27 @@ func Munmap(b []byte) (err error) {
 //sys	Mlockall(flags int) (err error)
 //sys	Munlockall() (err error)
 
+func Getrlimit(resource int, rlim *Rlimit) (err error) {
+	// prlimit1 is the same as prlimit when newlimit == nil
+	return prlimit1(0, resource, nil, rlim)
+}
+
+// setrlimit sets a resource limit.
+// The Setrlimit function is in rlimit.go, and calls this one.
+func setrlimit(resource int, rlim *Rlimit) (err error) {
+	return prlimit1(0, resource, rlim, nil)
+}
+
 // prlimit changes a resource limit. We use a single definition so that
 // we can tell StartProcess to not restore the original NOFILE limit.
-// This is unexported but can be called from x/sys/unix.
+//
+// golang.org/x/sys linknames prlimit.
+// Do not remove or change the type signature.
+//
+//go:linkname prlimit
 func prlimit(pid int, resource int, newlimit *Rlimit, old *Rlimit) (err error) {
 	err = prlimit1(pid, resource, newlimit, old)
-	if err == nil && newlimit != nil && resource == RLIMIT_NOFILE {
+	if err == nil && newlimit != nil && resource == RLIMIT_NOFILE && (pid == 0 || pid == Getpid()) {
 		origRlimitNofile.Store(nil)
 	}
 	return err

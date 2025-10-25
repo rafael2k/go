@@ -3,17 +3,22 @@
 // license that can be found in the LICENSE file.
 
 // Package url parses URLs and implements query escaping.
+//
+// See RFC 3986. This package generally follows RFC 3986, except where
+// it deviates for compatibility reasons.
+// RFC 6874 followed for IPv6 zone literals.
+
+//go:generate go run gen_encoding_table.go
+
 package url
 
-// See RFC 3986. This package generally follows RFC 3986, except where
-// it deviates for compatibility reasons. When sending changes, first
-// search old issues for history on decisions. Unit tests should also
-// contain references to issue numbers with details.
+// When sending changes, first  search old issues for history on decisions.
+// Unit tests should also contain references to issue numbers with details.
 
 import (
 	"errors"
 	"fmt"
-	"maps"
+	"net/netip"
 	"path"
 	"slices"
 	"strconv"
@@ -48,15 +53,7 @@ func (e *Error) Temporary() bool {
 const upperhex = "0123456789ABCDEF"
 
 func ishex(c byte) bool {
-	switch {
-	case '0' <= c && c <= '9':
-		return true
-	case 'a' <= c && c <= 'f':
-		return true
-	case 'A' <= c && c <= 'F':
-		return true
-	}
-	return false
+	return table[c]&hexChar != 0
 }
 
 func unhex(c byte) byte {
@@ -72,18 +69,6 @@ func unhex(c byte) byte {
 	}
 }
 
-type encoding int
-
-const (
-	encodePath encoding = 1 + iota
-	encodePathSegment
-	encodeHost
-	encodeZone
-	encodeUserPassword
-	encodeQueryComponent
-	encodeFragment
-)
-
 type EscapeError string
 
 func (e EscapeError) Error() string {
@@ -96,86 +81,9 @@ func (e InvalidHostError) Error() string {
 	return "invalid character " + strconv.Quote(string(e)) + " in host name"
 }
 
-// Return true if the specified character should be escaped when
-// appearing in a URL string, according to RFC 3986.
-//
-// Please be informed that for now shouldEscape does not check all
-// reserved characters correctly. See golang.org/issue/5684.
+// See the reference implementation in gen_encoding_table.go.
 func shouldEscape(c byte, mode encoding) bool {
-	// §2.3 Unreserved characters (alphanum)
-	if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
-		return false
-	}
-
-	if mode == encodeHost || mode == encodeZone {
-		// §3.2.2 Host allows
-		//	sub-delims = "!" / "$" / "&" / "'" / "(" / ")" / "*" / "+" / "," / ";" / "="
-		// as part of reg-name.
-		// We add : because we include :port as part of host.
-		// We add [ ] because we include [ipv6]:port as part of host.
-		// We add < > because they're the only characters left that
-		// we could possibly allow, and Parse will reject them if we
-		// escape them (because hosts can't use %-encoding for
-		// ASCII bytes).
-		switch c {
-		case '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=', ':', '[', ']', '<', '>', '"':
-			return false
-		}
-	}
-
-	switch c {
-	case '-', '_', '.', '~': // §2.3 Unreserved characters (mark)
-		return false
-
-	case '$', '&', '+', ',', '/', ':', ';', '=', '?', '@': // §2.2 Reserved characters (reserved)
-		// Different sections of the URL allow a few of
-		// the reserved characters to appear unescaped.
-		switch mode {
-		case encodePath: // §3.3
-			// The RFC allows : @ & = + $ but saves / ; , for assigning
-			// meaning to individual path segments. This package
-			// only manipulates the path as a whole, so we allow those
-			// last three as well. That leaves only ? to escape.
-			return c == '?'
-
-		case encodePathSegment: // §3.3
-			// The RFC allows : @ & = + $ but saves / ; , for assigning
-			// meaning to individual path segments.
-			return c == '/' || c == ';' || c == ',' || c == '?'
-
-		case encodeUserPassword: // §3.2.1
-			// The RFC allows ';', ':', '&', '=', '+', '$', and ',' in
-			// userinfo, so we must escape only '@', '/', and '?'.
-			// The parsing of userinfo treats ':' as special so we must escape
-			// that too.
-			return c == '@' || c == '/' || c == '?' || c == ':'
-
-		case encodeQueryComponent: // §3.4
-			// The RFC reserves (so we must escape) everything.
-			return true
-
-		case encodeFragment: // §4.1
-			// The RFC text is silent but the grammar allows
-			// everything, so escape nothing.
-			return false
-		}
-	}
-
-	if mode == encodeFragment {
-		// RFC 3986 §2.2 allows not escaping sub-delims. A subset of sub-delims are
-		// included in reserved from RFC 2396 §2.2. The remaining sub-delims do not
-		// need to be escaped. To minimize potential breakage, we apply two restrictions:
-		// (1) we always escape sub-delims outside of the fragment, and (2) we always
-		// escape single quote to avoid breaking callers that had previously assumed that
-		// single quotes would be escaped. See issue #19917.
-		switch c {
-		case '!', '(', ')', '*':
-			return false
-		}
-	}
-
-	// Everything else must be escaped.
-	return true
+	return table[c]&mode == 0
 }
 
 // QueryUnescape does the inverse transformation of [QueryEscape],
@@ -362,25 +270,41 @@ func escape(s string, mode encoding) string {
 // A consequence is that it is impossible to tell which slashes in the Path were
 // slashes in the raw URL and which were %2f. This distinction is rarely important,
 // but when it is, the code should use the [URL.EscapedPath] method, which preserves
-// the original encoding of Path.
+// the original encoding of Path. The Fragment field is also stored in decoded form,
+// use [URL.EscapedFragment] to retrieve the original encoding.
 //
-// The RawPath field is an optional field which is only set when the default
-// encoding of Path is different from the escaped path. See the EscapedPath method
-// for more details.
-//
-// URL's String method uses the EscapedPath method to obtain the path.
+// The [URL.String] method uses the [URL.EscapedPath] method to obtain the path.
 type URL struct {
-	Scheme      string
-	Opaque      string    // encoded opaque data
-	User        *Userinfo // username and password information
-	Host        string    // host or host:port (see Hostname and Port methods)
-	Path        string    // path (relative paths may omit leading slash)
-	RawPath     string    // encoded path hint (see EscapedPath method)
-	OmitHost    bool      // do not emit empty host (authority)
-	ForceQuery  bool      // append a query ('?') even if RawQuery is empty
-	RawQuery    string    // encoded query values, without '?'
-	Fragment    string    // fragment for references, without '#'
-	RawFragment string    // encoded fragment hint (see EscapedFragment method)
+	Scheme   string
+	Opaque   string    // encoded opaque data
+	User     *Userinfo // username and password information
+	Host     string    // "host" or "host:port" (see Hostname and Port methods)
+	Path     string    // path (relative paths may omit leading slash)
+	Fragment string    // fragment for references (without '#')
+
+	// RawQuery contains the encoded query values, without the initial '?'.
+	// Use URL.Query to decode the query.
+	RawQuery string
+
+	// RawPath is an optional field containing an encoded path hint.
+	// See the EscapedPath method for more details.
+	//
+	// In general, code should call EscapedPath instead of reading RawPath.
+	RawPath string
+
+	// RawFragment is an optional field containing an encoded fragment hint.
+	// See the EscapedFragment method for more details.
+	//
+	// In general, code should call EscapedFragment instead of reading RawFragment.
+	RawFragment string
+
+	// ForceQuery indicates whether the original URL contained a query ('?') character.
+	// When set, the String method will include a trailing '?', even when RawQuery is empty.
+	ForceQuery bool
+
+	// OmitHost indicates the URL has an empty host (authority).
+	// When set, the String method will not include the host when it is empty.
+	OmitHost bool
 }
 
 // User returns a [Userinfo] containing the provided username
@@ -624,40 +548,61 @@ func parseAuthority(authority string) (user *Userinfo, host string, err error) {
 // parseHost parses host as an authority without user
 // information. That is, as host[:port].
 func parseHost(host string) (string, error) {
-	if strings.HasPrefix(host, "[") {
+	if openBracketIdx := strings.LastIndex(host, "["); openBracketIdx != -1 {
 		// Parse an IP-Literal in RFC 3986 and RFC 6874.
 		// E.g., "[fe80::1]", "[fe80::1%25en0]", "[fe80::1]:80".
-		i := strings.LastIndex(host, "]")
-		if i < 0 {
+		closeBracketIdx := strings.LastIndex(host, "]")
+		if closeBracketIdx < 0 {
 			return "", errors.New("missing ']' in host")
 		}
-		colonPort := host[i+1:]
+
+		colonPort := host[closeBracketIdx+1:]
 		if !validOptionalPort(colonPort) {
 			return "", fmt.Errorf("invalid port %q after host", colonPort)
 		}
+		unescapedColonPort, err := unescape(colonPort, encodeHost)
+		if err != nil {
+			return "", err
+		}
 
+		hostname := host[openBracketIdx+1 : closeBracketIdx]
+		var unescapedHostname string
 		// RFC 6874 defines that %25 (%-encoded percent) introduces
 		// the zone identifier, and the zone identifier can use basically
 		// any %-encoding it likes. That's different from the host, which
 		// can only %-encode non-ASCII bytes.
 		// We do impose some restrictions on the zone, to avoid stupidity
 		// like newlines.
-		zone := strings.Index(host[:i], "%25")
-		if zone >= 0 {
-			host1, err := unescape(host[:zone], encodeHost)
+		zoneIdx := strings.Index(hostname, "%25")
+		if zoneIdx >= 0 {
+			hostPart, err := unescape(hostname[:zoneIdx], encodeHost)
 			if err != nil {
 				return "", err
 			}
-			host2, err := unescape(host[zone:i], encodeZone)
+			zonePart, err := unescape(hostname[zoneIdx:], encodeZone)
 			if err != nil {
 				return "", err
 			}
-			host3, err := unescape(host[i:], encodeHost)
+			unescapedHostname = hostPart + zonePart
+		} else {
+			var err error
+			unescapedHostname, err = unescape(hostname, encodeHost)
 			if err != nil {
 				return "", err
 			}
-			return host1 + host2 + host3, nil
 		}
+
+		// Per RFC 3986, only a host identified by a valid
+		// IPv6 address can be enclosed by square brackets.
+		// This excludes any IPv4, but notably not IPv4-mapped addresses.
+		addr, err := netip.ParseAddr(unescapedHostname)
+		if err != nil {
+			return "", fmt.Errorf("invalid host: %w", err)
+		}
+		if addr.Is4() {
+			return "", errors.New("invalid IP-literal")
+		}
+		return "[" + unescapedHostname + "]" + unescapedColonPort, nil
 	} else if i := strings.LastIndex(host, ":"); i != -1 {
 		colonPort := host[i:]
 		if !validOptionalPort(colonPort) {
@@ -1006,7 +951,16 @@ func (v Values) Encode() string {
 		return ""
 	}
 	var buf strings.Builder
-	for _, k := range slices.Sorted(maps.Keys(v)) {
+	// To minimize allocations, we eschew iterators and pre-size the slice in
+	// which we collect v's keys.
+	keys := make([]string, len(v))
+	var i int
+	for k := range v {
+		keys[i] = k
+		i++
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
 		vs := v[k]
 		keyEscaped := QueryEscape(k)
 		for _, v := range vs {
@@ -1278,7 +1232,18 @@ func validUserinfo(s string) bool {
 		}
 		switch r {
 		case '-', '.', '_', ':', '~', '!', '$', '&', '\'',
-			'(', ')', '*', '+', ',', ';', '=', '%', '@':
+			'(', ')', '*', '+', ',', ';', '=', '%':
+			continue
+		case '@':
+			// `RFC 3986 section 3.2.1` does not allow '@' in userinfo.
+			// It is a delimiter between userinfo and host.
+			// However, URLs are diverse, and in some cases,
+			// the userinfo may contain an '@' character,
+			// for example, in "http://username:p@ssword@google.com",
+			// the string "username:p@ssword" should be treated as valid userinfo.
+			// Ref:
+			//   https://go.dev/issue/3439
+			//   https://go.dev/issue/22655
 			continue
 		default:
 			return false

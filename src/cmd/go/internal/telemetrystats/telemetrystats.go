@@ -11,6 +11,7 @@ import (
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/modload"
 	"cmd/internal/telemetry/counter"
+	"strings"
 )
 
 func Increment() {
@@ -21,9 +22,9 @@ func Increment() {
 // incrementConfig increments counters for the configuration
 // the command is running in.
 func incrementConfig() {
-	if !modload.WillBeEnabled() {
+	if !modload.WillBeEnabled(modload.LoaderState) {
 		counter.Inc("go/mode:gopath")
-	} else if workfile := modload.FindGoWork(base.Cwd()); workfile != "" {
+	} else if workfile := modload.FindGoWork(modload.LoaderState, base.Cwd()); workfile != "" {
 		counter.Inc("go/mode:workspace")
 	} else {
 		counter.Inc("go/mode:module")
@@ -47,5 +48,17 @@ func incrementConfig() {
 		counter.Inc("go/platform/target/goriscv64:" + cfg.GORISCV64)
 	case "wasm":
 		counter.Inc("go/platform/target/gowasm:" + cfg.GOWASM)
+	}
+
+	// Use cfg.Experiment.String instead of cfg.Experiment.Enabled
+	// because we only want to count the experiments that differ
+	// from the baseline.
+	if cfg.Experiment != nil {
+		for exp := range strings.SplitSeq(cfg.Experiment.String(), ",") {
+			if exp == "" {
+				continue
+			}
+			counter.Inc("go/goexperiment:" + exp)
+		}
 	}
 }

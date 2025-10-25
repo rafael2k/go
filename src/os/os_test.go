@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -839,8 +840,7 @@ func TestReaddirOfFile(t *testing.T) {
 	if err == nil {
 		t.Error("Readdirnames succeeded; want non-nil error")
 	}
-	var pe *PathError
-	if !errors.As(err, &pe) || pe.Path != f.Name() {
+	if pe, ok := errors.AsType[*PathError](err); !ok || pe.Path != f.Name() {
 		t.Errorf("Readdirnames returned %q; want a PathError with path %q", err, f.Name())
 	}
 	if len(names) > 0 {
@@ -849,34 +849,49 @@ func TestReaddirOfFile(t *testing.T) {
 }
 
 func TestHardLink(t *testing.T) {
+	testMaybeRooted(t, testHardLink)
+}
+func testHardLink(t *testing.T, root *Root) {
 	testenv.MustHaveLink(t)
-	t.Chdir(t.TempDir())
+
+	var (
+		create = Create
+		link   = Link
+		stat   = Stat
+		op     = "link"
+	)
+	if root != nil {
+		create = root.Create
+		link = root.Link
+		stat = root.Stat
+		op = "linkat"
+	}
 
 	from, to := "hardlinktestfrom", "hardlinktestto"
-	file, err := Create(to)
+	file, err := create(to)
 	if err != nil {
 		t.Fatalf("open %q failed: %v", to, err)
 	}
 	if err = file.Close(); err != nil {
 		t.Errorf("close %q failed: %v", to, err)
 	}
-	err = Link(to, from)
+	err = link(to, from)
 	if err != nil {
 		t.Fatalf("link %q, %q failed: %v", to, from, err)
 	}
 
 	none := "hardlinktestnone"
-	err = Link(none, none)
+	err = link(none, none)
 	// Check the returned error is well-formed.
 	if lerr, ok := err.(*LinkError); !ok || lerr.Error() == "" {
 		t.Errorf("link %q, %q failed to return a valid error", none, none)
 	}
 
-	tostat, err := Stat(to)
+	tostat, err := stat(to)
 	if err != nil {
 		t.Fatalf("stat %q failed: %v", to, err)
 	}
-	fromstat, err := Stat(from)
+	fromstat, err := stat(from)
 	if err != nil {
 		t.Fatalf("stat %q failed: %v", from, err)
 	}
@@ -884,11 +899,11 @@ func TestHardLink(t *testing.T) {
 		t.Errorf("link %q, %q did not create hard link", to, from)
 	}
 	// We should not be able to perform the same Link() a second time
-	err = Link(to, from)
+	err = link(to, from)
 	switch err := err.(type) {
 	case *LinkError:
-		if err.Op != "link" {
-			t.Errorf("Link(%q, %q) err.Op = %q; want %q", to, from, err.Op, "link")
+		if err.Op != op {
+			t.Errorf("Link(%q, %q) err.Op = %q; want %q", to, from, err.Op, op)
 		}
 		if err.Old != to {
 			t.Errorf("Link(%q, %q) err.Old = %q; want %q", to, from, err.Old, to)
@@ -907,43 +922,62 @@ func TestHardLink(t *testing.T) {
 }
 
 func TestSymlink(t *testing.T) {
+	testMaybeRooted(t, testSymlink)
+}
+func testSymlink(t *testing.T, root *Root) {
 	testenv.MustHaveSymlink(t)
-	t.Chdir(t.TempDir())
+
+	var (
+		create   = Create
+		open     = Open
+		symlink  = Symlink
+		stat     = Stat
+		lstat    = Lstat
+		readlink = Readlink
+	)
+	if root != nil {
+		create = root.Create
+		open = root.Open
+		symlink = root.Symlink
+		stat = root.Stat
+		lstat = root.Lstat
+		readlink = root.Readlink
+	}
 
 	from, to := "symlinktestfrom", "symlinktestto"
-	file, err := Create(to)
+	file, err := create(to)
 	if err != nil {
 		t.Fatalf("Create(%q) failed: %v", to, err)
 	}
 	if err = file.Close(); err != nil {
 		t.Errorf("Close(%q) failed: %v", to, err)
 	}
-	err = Symlink(to, from)
+	err = symlink(to, from)
 	if err != nil {
 		t.Fatalf("Symlink(%q, %q) failed: %v", to, from, err)
 	}
-	tostat, err := Lstat(to)
+	tostat, err := lstat(to)
 	if err != nil {
 		t.Fatalf("Lstat(%q) failed: %v", to, err)
 	}
 	if tostat.Mode()&ModeSymlink != 0 {
 		t.Fatalf("Lstat(%q).Mode()&ModeSymlink = %v, want 0", to, tostat.Mode()&ModeSymlink)
 	}
-	fromstat, err := Stat(from)
+	fromstat, err := stat(from)
 	if err != nil {
 		t.Fatalf("Stat(%q) failed: %v", from, err)
 	}
 	if !SameFile(tostat, fromstat) {
 		t.Errorf("Symlink(%q, %q) did not create symlink", to, from)
 	}
-	fromstat, err = Lstat(from)
+	fromstat, err = lstat(from)
 	if err != nil {
 		t.Fatalf("Lstat(%q) failed: %v", from, err)
 	}
 	if fromstat.Mode()&ModeSymlink == 0 {
 		t.Fatalf("Lstat(%q).Mode()&ModeSymlink = 0, want %v", from, ModeSymlink)
 	}
-	fromstat, err = Stat(from)
+	fromstat, err = stat(from)
 	if err != nil {
 		t.Fatalf("Stat(%q) failed: %v", from, err)
 	}
@@ -953,14 +987,14 @@ func TestSymlink(t *testing.T) {
 	if fromstat.Mode()&ModeSymlink != 0 {
 		t.Fatalf("Stat(%q).Mode()&ModeSymlink = %v, want 0", from, fromstat.Mode()&ModeSymlink)
 	}
-	s, err := Readlink(from)
+	s, err := readlink(from)
 	if err != nil {
 		t.Fatalf("Readlink(%q) failed: %v", from, err)
 	}
 	if s != to {
 		t.Fatalf("Readlink(%q) = %q, want %q", from, s, to)
 	}
-	file, err = Open(from)
+	file, err = open(from)
 	if err != nil {
 		t.Fatalf("Open(%q) failed: %v", from, err)
 	}
@@ -1344,6 +1378,9 @@ var hasNoatime = sync.OnceValue(func() bool {
 	// but the syscall is OS-specific and is not even wired into Go stdlib.
 	//
 	// Only used on NetBSD (which ignores explicit atime updates with noatime).
+	if runtime.GOOS != "netbsd" {
+		return false
+	}
 	mounts, _ := ReadFile("/proc/mounts")
 	return bytes.Contains(mounts, []byte("noatime"))
 })
@@ -2044,20 +2081,58 @@ func TestWriteAt(t *testing.T) {
 
 	f := newFile(t)
 
-	const data = "hello, world\n"
+	const data = "hello, world"
 	io.WriteString(f, data)
 
-	n, err := f.WriteAt([]byte("WORLD"), 7)
-	if err != nil || n != 5 {
+	n, err := f.WriteAt([]byte("WOR"), 7)
+	if err != nil || n != 3 {
 		t.Fatalf("WriteAt 7: %d, %v", n, err)
 	}
+	n, err = io.WriteString(f, "!") // test that WriteAt doesn't change the file offset
+	if err != nil || n != 1 {
+		t.Fatal(err)
+	}
 
-	b, err := ReadFile(f.Name())
+	got, err := ReadFile(f.Name())
 	if err != nil {
 		t.Fatalf("ReadFile %s: %v", f.Name(), err)
 	}
-	if string(b) != "hello, WORLD\n" {
-		t.Fatalf("after write: have %q want %q", string(b), "hello, WORLD\n")
+	want := "hello, WORld!"
+	if string(got) != want {
+		t.Fatalf("after write: have %q want %q", string(got), want)
+	}
+}
+
+func TestWriteAtConcurrent(t *testing.T) {
+	t.Parallel()
+
+	f := newFile(t)
+	io.WriteString(f, "0000000000")
+
+	var wg sync.WaitGroup
+	for i := range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n, err := f.WriteAt([]byte(strconv.Itoa(i)), int64(i))
+			if err != nil || n != 1 {
+				t.Errorf("WriteAt %d: %d, %v", i, n, err)
+			}
+			n, err = io.WriteString(f, "!") // test that WriteAt doesn't change the file offset
+			if err != nil || n != 1 {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	got, err := ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", f.Name(), err)
+	}
+	want := "0123456789!!!!!!!!!!"
+	if string(got) != want {
+		t.Fatalf("after write: have %q want %q", string(got), want)
 	}
 }
 
@@ -2221,6 +2296,32 @@ func TestFilePermissions(t *testing.T) {
 		})
 	}
 
+}
+
+func TestOpenFileCreateExclDanglingSymlink(t *testing.T) {
+	testenv.MustHaveSymlink(t)
+	testMaybeRooted(t, func(t *testing.T, r *Root) {
+		const link = "link"
+		if err := Symlink("does_not_exist", link); err != nil {
+			t.Fatal(err)
+		}
+		var f *File
+		var err error
+		if r == nil {
+			f, err = OpenFile(link, O_WRONLY|O_CREATE|O_EXCL, 0o444)
+		} else {
+			f, err = r.OpenFile(link, O_WRONLY|O_CREATE|O_EXCL, 0o444)
+		}
+		if err == nil {
+			f.Close()
+		}
+		if !errors.Is(err, ErrExist) {
+			t.Errorf("OpenFile of a dangling symlink with O_CREATE|O_EXCL = %v, want ErrExist", err)
+		}
+		if _, err := Stat(link); err == nil {
+			t.Errorf("OpenFile of a dangling symlink with O_CREATE|O_EXCL created a file")
+		}
+	})
 }
 
 // TestFileRDWRFlags tests the O_RDONLY, O_WRONLY, and O_RDWR flags.

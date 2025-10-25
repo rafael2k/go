@@ -305,6 +305,14 @@ const (
 	// R_RISCV_BRANCH resolves a 12-bit PC-relative branch offset.
 	R_RISCV_BRANCH
 
+	// R_RISCV_ADD32 resolves a 32-bit label addition, being the stored value,
+	// plus the symbol address plus the addend (V + S + A).
+	R_RISCV_ADD32
+
+	// R_RISCV_SUB32 resolves a 32-bit label subtraction, being the stored value,
+	// minus the symbol address minus the addend (V - S - A).
+	R_RISCV_SUB32
+
 	// R_RISCV_RVC_BRANCH resolves an 8-bit PC-relative offset for a CB-type
 	// instruction.
 	R_RISCV_RVC_BRANCH
@@ -466,7 +474,7 @@ func (r RelocType) IsDwTxtAddr() bool {
 // FuncCountToDwTxtAddrFlavor returns the correct DWARF .debug_addr
 // section relocation to use when compiling a package with a total of
 // fncount functions, along with the size of the ULEB128-encoded blob
-// needed to store the the eventual .debug_addr index.
+// needed to store the eventual .debug_addr index.
 func FuncCountToDwTxtAddrFlavor(fncount int) (RelocType, int) {
 	switch {
 	case fncount <= 127:
@@ -480,6 +488,30 @@ func FuncCountToDwTxtAddrFlavor(fncount int) (RelocType, int) {
 	default:
 		panic("package has more than 268435455 functions")
 	}
+}
+
+// DummyDwarfFunctionCountForAssembler returns a dummy value to be
+// used for "total number of functions in the package" for use in the
+// assembler (compiler does not call this function).
+//
+// Background/motivation: let's say we have a package P with some
+// assembly functions (in "a.s") and some Go functions (in
+// "b.go"). The compilation sequence used by the Go commmand will be:
+//
+// 1. run the assembler on a.s to generate a "symabis" file
+// 2. run the compiler on b.go passing it the symabis file and generating a "go_defs.h" asm header
+// 3. run the assembler on a.s passing it an include dir with the generated "go_defs.h" file
+//
+// When the compiler runs, it can easily determine the total function
+// count for the package (for use with FuncCountToDwTxtAddrFlavor
+// above) by counting defined Go funcs and looking at the symabis
+// file. With the assembler however there is no easy way for it to
+// figure out the total number of Go source funcs. To keep things
+// simple, we instead just use a dummy total function count while
+// running the assembler that will guarantee we pick a relocation
+// flavor that will work for any package size.
+func DummyDwarfFunctionCountForAssembler() int {
+	return 9999999
 }
 
 // DwTxtAddrRelocParams returns the maximum number of functions per

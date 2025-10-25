@@ -324,12 +324,14 @@ func (c *conn) hijackLocked() (rwc net.Conn, buf *bufio.ReadWriter, err error) {
 	rwc = c.rwc
 	rwc.SetDeadline(time.Time{})
 
-	buf = bufio.NewReadWriter(c.bufr, bufio.NewWriter(rwc))
 	if c.r.hasByte {
 		if _, err := c.bufr.Peek(c.bufr.Buffered() + 1); err != nil {
 			return nil, nil, fmt.Errorf("unexpected Peek failure reading buffered byte: %v", err)
 		}
 	}
+	c.bufw.Reset(rwc)
+	buf = bufio.NewReadWriter(c.bufr, c.bufw)
+
 	c.setState(rwc, StateHijacked, runHooks)
 	return
 }
@@ -652,10 +654,13 @@ type readResult struct {
 // read sizes) with support for selectively keeping an io.Reader.Read
 // call blocked in a background goroutine to wait for activity and
 // trigger a CloseNotifier channel.
+// After a Handler has hijacked the conn and exited, connReader behaves like a
+// proxy for the net.Conn and the aforementioned behavior is bypassed.
 type connReader struct {
-	conn *conn
+	rwc net.Conn // rwc is the underlying network connection.
 
 	mu      sync.Mutex // guards following
+	conn    *conn      // conn is nil after handler exit.
 	hasByte bool
 	byteBuf [1]byte
 	cond    *sync.Cond
@@ -673,6 +678,12 @@ func (cr *connReader) lock() {
 
 func (cr *connReader) unlock() { cr.mu.Unlock() }
 
+func (cr *connReader) releaseConn() {
+	cr.lock()
+	defer cr.unlock()
+	cr.conn = nil
+}
+
 func (cr *connReader) startBackgroundRead() {
 	cr.lock()
 	defer cr.unlock()
@@ -683,12 +694,12 @@ func (cr *connReader) startBackgroundRead() {
 		return
 	}
 	cr.inRead = true
-	cr.conn.rwc.SetReadDeadline(time.Time{})
+	cr.rwc.SetReadDeadline(time.Time{})
 	go cr.backgroundRead()
 }
 
 func (cr *connReader) backgroundRead() {
-	n, err := cr.conn.rwc.Read(cr.byteBuf[:])
+	n, err := cr.rwc.Read(cr.byteBuf[:])
 	cr.lock()
 	if n == 1 {
 		cr.hasByte = true
@@ -719,7 +730,7 @@ func (cr *connReader) backgroundRead() {
 		// Ignore this error. It's the expected error from
 		// another goroutine calling abortPendingRead.
 	} else if err != nil {
-		cr.handleReadError(err)
+		cr.handleReadErrorLocked(err)
 	}
 	cr.aborted = false
 	cr.inRead = false
@@ -734,18 +745,18 @@ func (cr *connReader) abortPendingRead() {
 		return
 	}
 	cr.aborted = true
-	cr.conn.rwc.SetReadDeadline(aLongTimeAgo)
+	cr.rwc.SetReadDeadline(aLongTimeAgo)
 	for cr.inRead {
 		cr.cond.Wait()
 	}
-	cr.conn.rwc.SetReadDeadline(time.Time{})
+	cr.rwc.SetReadDeadline(time.Time{})
 }
 
 func (cr *connReader) setReadLimit(remain int64) { cr.remain = remain }
 func (cr *connReader) setInfiniteReadLimit()     { cr.remain = maxInt64 }
 func (cr *connReader) hitReadLimit() bool        { return cr.remain <= 0 }
 
-// handleReadError is called whenever a Read from the client returns a
+// handleReadErrorLocked is called whenever a Read from the client returns a
 // non-nil error.
 //
 // The provided non-nil err is almost always io.EOF or a "use of
@@ -754,14 +765,12 @@ func (cr *connReader) hitReadLimit() bool        { return cr.remain <= 0 }
 // development. Any error means the connection is dead and we should
 // down its context.
 //
-// It may be called from multiple goroutines.
-func (cr *connReader) handleReadError(_ error) {
+// The caller must hold connReader.mu.
+func (cr *connReader) handleReadErrorLocked(_ error) {
+	if cr.conn == nil {
+		return
+	}
 	cr.conn.cancelCtx()
-	cr.closeNotify()
-}
-
-// may be called from multiple goroutines.
-func (cr *connReader) closeNotify() {
 	if res := cr.conn.curReq.Load(); res != nil {
 		res.closeNotify()
 	}
@@ -769,9 +778,14 @@ func (cr *connReader) closeNotify() {
 
 func (cr *connReader) Read(p []byte) (n int, err error) {
 	cr.lock()
-	if cr.inRead {
+	if cr.conn == nil {
 		cr.unlock()
-		if cr.conn.hijacked() {
+		return cr.rwc.Read(p)
+	}
+	if cr.inRead {
+		hijacked := cr.conn.hijacked()
+		cr.unlock()
+		if hijacked {
 			panic("invalid Body.Read call. After hijacked, the original Request must not be used")
 		}
 		panic("invalid concurrent Body.Read call")
@@ -795,12 +809,12 @@ func (cr *connReader) Read(p []byte) (n int, err error) {
 	}
 	cr.inRead = true
 	cr.unlock()
-	n, err = cr.conn.rwc.Read(p)
+	n, err = cr.rwc.Read(p)
 
 	cr.lock()
 	cr.inRead = false
 	if err != nil {
-		cr.handleReadError(err)
+		cr.handleReadErrorLocked(err)
 	}
 	cr.remain -= int64(n)
 	cr.unlock()
@@ -822,6 +836,7 @@ var copyBufPool = sync.Pool{New: func() any { return new([copyBufPoolSize]byte) 
 func getCopyBuf() []byte {
 	return copyBufPool.Get().(*[copyBufPoolSize]byte)[:]
 }
+
 func putCopyBuf(b []byte) {
 	if len(b) != copyBufPoolSize {
 		panic("trying to put back buffer of the wrong size in the copyBufPool")
@@ -1599,7 +1614,7 @@ func writeStatusLine(bw *bufio.Writer, is11 bool, code int, scratch []byte) {
 // It's illegal to call this before the header has been flushed.
 func (w *response) bodyAllowed() bool {
 	if !w.wroteHeader {
-		panic("")
+		panic("net/http: bodyAllowed called before the header was written")
 	}
 	return bodyAllowedForStatus(w.status)
 }
@@ -1910,6 +1925,10 @@ func isCommonNetReadError(err error) bool {
 	return false
 }
 
+type connectionStater interface {
+	ConnectionState() tls.ConnectionState
+}
+
 // Serve a new connection.
 func (c *conn) serve(ctx context.Context) {
 	if ra := c.rwc.RemoteAddr(); ra != nil {
@@ -1982,11 +2001,19 @@ func (c *conn) serve(ctx context.Context) {
 
 	// HTTP/1.x from here on.
 
+	// Set Request.TLS if the conn is not a *tls.Conn, but implements ConnectionState.
+	if c.tlsState == nil {
+		if tc, ok := c.rwc.(connectionStater); ok {
+			c.tlsState = new(tls.ConnectionState)
+			*c.tlsState = tc.ConnectionState()
+		}
+	}
+
 	ctx, cancelCtx := context.WithCancel(ctx)
 	c.cancelCtx = cancelCtx
 	defer cancelCtx()
 
-	c.r = &connReader{conn: c}
+	c.r = &connReader{conn: c, rwc: c.rwc}
 	c.bufr = newBufioReader(c.r)
 	c.bufw = newBufioWriterSize(checkConnErrorWriter{c}, 4<<10)
 
@@ -2083,6 +2110,7 @@ func (c *conn) serve(ctx context.Context) {
 		inFlightResponse = nil
 		w.cancelCtx()
 		if c.hijacked() {
+			c.r.releaseConn()
 			return
 		}
 		w.finishRequest()
@@ -2362,6 +2390,8 @@ func StripPrefix(prefix string, h Handler) Handler {
 
 // Redirect replies to the request with a redirect to url,
 // which may be a path relative to the request path.
+// Any non-ASCII characters in url will be percent-encoded,
+// but existing percent encodings will not be changed.
 //
 // The provided code should be in the 3xx range and is usually
 // [StatusMovedPermanently], [StatusFound] or [StatusSeeOther].
@@ -2644,7 +2674,12 @@ func stripHostPort(h string) string {
 // the path that will match after following the redirect.
 //
 // If there is no registered handler that applies to the request,
-// Handler returns a “page not found” handler and an empty pattern.
+// Handler returns a “page not found” or “method not supported”
+// handler and an empty pattern.
+//
+// Handler does not modify its argument. In particular, it does not
+// populate named path wildcards, so r.PathValue will always return
+// the empty string.
 func (mux *ServeMux) Handler(r *Request) (h Handler, pattern string) {
 	if use121 {
 		return mux.mux121.findHandler(r)
@@ -2685,7 +2720,7 @@ func (mux *ServeMux) findHandler(r *Request) (h Handler, patStr string, _ *patte
 		var u *url.URL
 		n, matches, u = mux.matchOrRedirect(host, r.Method, path, r.URL)
 		if u != nil {
-			return RedirectHandler(u.String(), StatusMovedPermanently), u.Path, nil, nil
+			return RedirectHandler(u.String(), StatusMovedPermanently), n.pattern.String(), nil, nil
 		}
 		if path != escapedPath {
 			// Redirect to cleaned path.
@@ -2724,14 +2759,21 @@ func (mux *ServeMux) matchOrRedirect(host, method, path string, u *url.URL) (_ *
 	defer mux.mu.RUnlock()
 
 	n, matches := mux.tree.match(host, method, path)
-	// If we have an exact match, or we were asked not to try trailing-slash redirection,
-	// or the URL already has a trailing slash, then we're done.
-	if !exactMatch(n, path) && u != nil && !strings.HasSuffix(path, "/") {
+	// We can terminate here if any of the following is true:
+	// - We have an exact match already.
+	// - We were asked not to try trailing slash redirection.
+	// - The URL already has a trailing slash.
+	// - The URL is an empty string.
+	if !exactMatch(n, path) && u != nil && !strings.HasSuffix(path, "/") && path != "" {
 		// If there is an exact match with a trailing slash, then redirect.
 		path += "/"
 		n2, _ := mux.tree.match(host, method, path)
 		if exactMatch(n2, path) {
-			return nil, nil, &url.URL{Path: cleanPath(u.Path) + "/", RawQuery: u.RawQuery}
+			// It is safe to return n2 here: it is used only in the second RedirectHandler case
+			// of findHandler, and that method returns before it does the "n == nil" check where
+			// the first return value matters. We return it here only to make the pattern available
+			// to findHandler.
+			return n2, nil, &url.URL{Path: cleanPath(u.Path) + "/", RawQuery: u.RawQuery}
 		}
 	}
 	return n, matches, nil
@@ -2826,8 +2868,10 @@ func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
 // always refers to user code.
 
 // Handle registers the handler for the given pattern.
-// If the given pattern conflicts, with one that is already registered, Handle
-// panics.
+// If the given pattern conflicts with one that is already registered
+// or if the pattern is invalid, Handle panics.
+//
+// See [ServeMux] for details on valid patterns and conflict rules.
 func (mux *ServeMux) Handle(pattern string, handler Handler) {
 	if use121 {
 		mux.mux121.handle(pattern, handler)
@@ -2837,8 +2881,10 @@ func (mux *ServeMux) Handle(pattern string, handler Handler) {
 }
 
 // HandleFunc registers the handler function for the given pattern.
-// If the given pattern conflicts, with one that is already registered, HandleFunc
-// panics.
+// If the given pattern conflicts with one that is already registered
+// or if the pattern is invalid, HandleFunc panics.
+//
+// See [ServeMux] for details on valid patterns and conflict rules.
 func (mux *ServeMux) HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
 	if use121 {
 		mux.mux121.handleFunc(pattern, handler)
@@ -3020,6 +3066,9 @@ type Server struct {
 	// automatically closed when the function returns.
 	// If TLSNextProto is not nil, HTTP/2 support is not enabled
 	// automatically.
+	//
+	// Historically, TLSNextProto was used to disable HTTP/2 support.
+	// The Server.Protocols field now provides a simpler way to do this.
 	TLSNextProto map[string]func(*Server, *tls.Conn, Handler)
 
 	// ConnState specifies an optional callback function that is
@@ -3048,9 +3097,6 @@ type Server struct {
 	ConnContext func(ctx context.Context, c net.Conn) context.Context
 
 	// HTTP2 configures HTTP/2 connections.
-	//
-	// This field does not yet have any effect.
-	// See https://go.dev/issue/67813.
 	HTTP2 *HTTP2Config
 
 	// Protocols is the set of protocols accepted by the server.
@@ -3125,7 +3171,7 @@ const shutdownPollIntervalMax = 500 * time.Millisecond
 // Shutdown returns the context's error, otherwise it returns any
 // error returned from closing the [Server]'s underlying Listener(s).
 //
-// When Shutdown is called, [Serve], [ListenAndServe], and
+// When Shutdown is called, [Serve], [ServeTLS], [ListenAndServe], and
 // [ListenAndServeTLS] immediately return [ErrServerClosed]. Make sure the
 // program doesn't exit and waits instead for Shutdown to return.
 //

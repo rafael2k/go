@@ -364,6 +364,11 @@ func TestTypesInfo(t *testing.T) {
 		// go.dev/issue/47895
 		{`package p; import "unsafe"; type S struct { f int }; var s S; var _ = unsafe.Offsetof(s.f)`, `s.f`, `int`},
 
+		// go.dev/issue/74303. Note that interface field types are synthetic, so
+		// even though `func()` doesn't appear in the source, it appears in the
+		// syntax tree.
+		{`package p; type T interface { M(int) }`, `func(int)`, `func(int)`},
+
 		// go.dev/issue/50093
 		{`package u0a; func _[_ interface{int}]() {}`, `int`, `int`},
 		{`package u1a; func _[_ interface{~int}]() {}`, `~int`, `~int`},
@@ -2427,7 +2432,6 @@ type K = Nested[string]
 		)
 		var wg sync.WaitGroup
 		for i := 0; i < 2; i++ {
-			i := i
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -2475,8 +2479,8 @@ func TestInstantiateErrors(t *testing.T) {
 			t.Fatalf("Instantiate(%v, %v) returned nil error, want non-nil", T, test.targs)
 		}
 
-		var argErr *ArgumentError
-		if !errors.As(err, &argErr) {
+		argErr, ok := errors.AsType[*ArgumentError](err)
+		if !ok {
 			t.Fatalf("Instantiate(%v, %v): error is not an *ArgumentError", T, test.targs)
 		}
 
@@ -2491,8 +2495,8 @@ func TestArgumentErrorUnwrapping(t *testing.T) {
 		Index: 1,
 		Err:   Error{Msg: "test"},
 	}
-	var e Error
-	if !errors.As(err, &e) {
+	e, ok := errors.AsType[Error](err)
+	if !ok {
 		t.Fatalf("error %v does not wrap types.Error", err)
 	}
 	if e.Msg != "test" {
@@ -2608,7 +2612,6 @@ func fn() {
 	})
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			if got := len(idents[test.name]); got != 1 {
 				t.Fatalf("found %d identifiers named %s, want 1", got, test.name)
@@ -3169,5 +3172,41 @@ func (recv T) f(param int) (result int) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestIssue73871(t *testing.T) {
+	const src = `package p
+
+func f[T ~[]byte](y T) []byte { return append([]byte(nil), y...) }
+
+// for illustration only:
+type B []byte
+var _ = f[B]
+`
+	fset := token.NewFileSet()
+	f, _ := parser.ParseFile(fset, "p.go", src, 0)
+
+	pkg := NewPackage("p", "p")
+	info := &Info{Types: make(map[ast.Expr]TypeAndValue)}
+	check := NewChecker(&Config{}, fset, pkg, info)
+	if err := check.Files([]*ast.File{f}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check type inferred for 'append'.
+	//
+	// Before the fix, the inferred type of append's y parameter
+	// was T. When a client such as x/tools/go/ssa instantiated T=B,
+	// it would result in the Signature "func([]byte, B)" with the
+	// variadic flag set, an invalid combination that caused
+	// NewSignatureType to panic.
+	append := f.Decls[0].(*ast.FuncDecl).Body.List[0].(*ast.ReturnStmt).Results[0].(*ast.CallExpr).Fun
+	tAppend := info.TypeOf(append).(*Signature)
+	want := "func([]byte, ...byte) []byte"
+	if got := fmt.Sprint(tAppend); got != want {
+		// Before the fix, tAppend was func([]byte, T) []byte,
+		// where T prints as "<expected string type>".
+		t.Errorf("for append, inferred type %s, want %s", tAppend, want)
 	}
 }

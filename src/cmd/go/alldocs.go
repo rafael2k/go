@@ -18,7 +18,7 @@
 //	clean       remove object files and cached files
 //	doc         show documentation for package or symbol
 //	env         print Go environment information
-//	fix         update packages to use new APIs
+//	fix         apply fixes suggested by static checkers
 //	fmt         gofmt (reformat) package sources
 //	generate    generate Go files by processing source
 //	get         add dependencies to current module and install them
@@ -121,8 +121,9 @@
 //		The default is GOMAXPROCS, normally the number of CPUs available.
 //	-race
 //		enable data race detection.
-//		Supported only on linux/amd64, freebsd/amd64, darwin/amd64, darwin/arm64, windows/amd64,
-//		linux/ppc64le and linux/arm64 (only for 48-bit VMA).
+//		Supported only on darwin/amd64, darwin/arm64, freebsd/amd64, linux/amd64,
+//		linux/arm64 (only for 48-bit VMA), linux/ppc64le, linux/riscv64 and
+//		windows/amd64.
 //	-msan
 //		enable interoperation with memory sanitizer.
 //		Supported only on linux/amd64, linux/arm64, linux/loong64, freebsd/amd64
@@ -405,6 +406,8 @@
 //
 //	go doc
 //		Show documentation for current package.
+//	go doc -http
+//		Serve HTML documentation over HTTP for the current package.
 //	go doc Foo
 //		Show documentation for Foo in the current package.
 //		(Foo starts with a capital letter so it cannot match
@@ -439,26 +442,28 @@
 //
 // Flags:
 //
-//	-all
-//		Show all the documentation for the package.
-//	-c
-//		Respect case when matching symbols.
-//	-cmd
-//		Treat a command (package main) like a regular package.
-//		Otherwise package main's exported symbols are hidden
-//		when showing the package's top-level documentation.
-//	-short
-//		One-line representation for each symbol.
-//	-src
-//		Show the full source code for the symbol. This will
-//		display the full Go source of its declaration and
-//		definition, such as a function definition (including
-//		the body), type declaration or enclosing const
-//		block. The output may therefore include unexported
-//		details.
-//	-u
-//		Show documentation for unexported as well as exported
-//		symbols, methods, and fields.
+//		-all
+//			Show all the documentation for the package.
+//		-c
+//			Respect case when matching symbols.
+//		-cmd
+//			Treat a command (package main) like a regular package.
+//			Otherwise package main's exported symbols are hidden
+//			when showing the package's top-level documentation.
+//	  	-http
+//			Serve HTML docs over HTTP.
+//		-short
+//			One-line representation for each symbol.
+//		-src
+//			Show the full source code for the symbol. This will
+//			display the full Go source of its declaration and
+//			definition, such as a function definition (including
+//			the body), type declaration or enclosing const
+//			block. The output may therefore include unexported
+//			details.
+//		-u
+//			Show documentation for unexported as well as exported
+//			symbols, methods, and fields.
 //
 // # Print Go environment information
 //
@@ -490,22 +495,33 @@
 //
 // For more about environment variables, see 'go help environment'.
 //
-// # Update packages to use new APIs
+// # Apply fixes suggested by static checkers
 //
 // Usage:
 //
-//	go fix [-fix list] [packages]
+//	go fix [build flags] [-fixtool prog] [fix flags] [packages]
 //
-// Fix runs the Go fix command on the packages named by the import paths.
+// Fix runs the Go fix tool (cmd/fix) on the named packages
+// and applies suggested fixes.
 //
-// The -fix flag sets a comma-separated list of fixes to run.
-// The default is all known fixes.
-// (Its value is passed to 'go tool fix -r'.)
+// It supports these flags:
 //
-// For more about fix, see 'go doc cmd/fix'.
+//	  -diff
+//		instead of applying each fix, print the patch as a unified diff
+//
+// The -fixtool=prog flag selects a different analysis tool with
+// alternative or additional fixers; see the documentation for go vet's
+// -vettool flag for details.
+//
+// The default fix tool is 'go tool fix' or cmd/fix.
+// For help on its fixers and their flags, run 'go tool fix help'.
+// For details of a specific fixer such as 'hostport', see 'go tool fix help hostport'.
+//
 // For more about specifying packages, see 'go help packages'.
 //
-// To run fix with other options, run 'go tool fix'.
+// The build flags supported by go fix are those that control package resolution
+// and execution, such as -C, -n, -x, -v, -tags, and -toolexec.
+// For more about these flags, see 'go help build'.
 //
 // See also: go fmt, go vet.
 //
@@ -754,6 +770,8 @@
 // variable, which defaults to $GOPATH/bin or $HOME/go/bin if the GOPATH
 // environment variable is not set. Executables in $GOROOT
 // are installed in $GOROOT/bin or $GOTOOLDIR instead of $GOBIN.
+// Cross compiled binaries are installed in $GOOS_$GOARCH subdirectories
+// of the above.
 //
 // If the arguments have version suffixes (like @latest or @v1.0.0), "go install"
 // builds packages in module-aware mode, ignoring the go.mod file in the current
@@ -1071,8 +1089,8 @@
 //
 // The -retracted flag causes list to report information about retracted
 // module versions. When -retracted is used with -f or -json, the Retracted
-// field will be set to a string explaining why the version was retracted.
-// The string is taken from comments on the retract directive in the
+// field explains why the version was retracted.
+// The strings are taken from comments on the retract directive in the
 // module's go.mod file. When -retracted is used with -versions, retracted
 // versions are listed together with unretracted versions. The -retracted
 // flag may be used with or without -m.
@@ -1259,20 +1277,19 @@
 // The -tool=path and -droptool=path flags add and drop a tool declaration
 // for the given path.
 //
+// The -ignore=path and -dropignore=path flags add and drop a ignore declaration
+// for the given path.
+//
 // The -godebug, -dropgodebug, -require, -droprequire, -exclude, -dropexclude,
-// -replace, -dropreplace, -retract, -dropretract, -tool, and -droptool editing
-// flags may be repeated, and the changes are applied in the order given.
+// -replace, -dropreplace, -retract, -dropretract, -tool, -droptool, -ignore,
+// and -dropignore editing flags may be repeated, and the changes are applied
+// in the order given.
 //
 // The -print flag prints the final go.mod in its text format instead of
 // writing it back to go.mod.
 //
 // The -json flag prints the final go.mod file in JSON format instead of
 // writing it back to go.mod. The JSON output corresponds to these Go types:
-//
-//	type Module struct {
-//		Path    string
-//		Version string
-//	}
 //
 //	type GoMod struct {
 //		Module    ModPath
@@ -1283,6 +1300,13 @@
 //		Exclude   []Module
 //		Replace   []Replace
 //		Retract   []Retract
+//		Tool      []Tool
+//		Ignore    []Ignore
+//	}
+//
+//	type Module struct {
+//		Path    string
+//		Version string
 //	}
 //
 //	type ModPath struct {
@@ -1313,6 +1337,10 @@
 //	}
 //
 //	type Tool struct {
+//		Path string
+//	}
+//
+//	type Ignore struct {
 //		Path string
 //	}
 //
@@ -1358,8 +1386,7 @@
 //
 // Init accepts one optional argument, the module path for the new module. If the
 // module path argument is omitted, init will attempt to infer the module path
-// using import comments in .go files, vendoring tool configuration files (like
-// Gopkg.lock), and the current directory (if in GOPATH).
+// using import comments in .go files and the current directory (if in GOPATH).
 //
 // See https://golang.org/ref/mod#go-mod-init for more about 'go mod init'.
 //
@@ -1968,7 +1995,7 @@
 //
 // Usage:
 //
-//	go version [-m] [-v] [file ...]
+//	go version [-m] [-v] [-json] [file ...]
 //
 // Version prints the build information for Go binary files.
 //
@@ -1987,6 +2014,9 @@
 // information consists of multiple lines following the version line, each
 // indented by a leading tab character.
 //
+// The -json flag is similar to -m but outputs the runtime/debug.BuildInfo in JSON format.
+// If flag -json is specified without -m, go version reports an error.
+//
 // See also: go doc runtime/debug.BuildInfo.
 //
 // # Report likely mistakes in packages
@@ -1995,19 +2025,35 @@
 //
 //	go vet [build flags] [-vettool prog] [vet flags] [packages]
 //
-// Vet runs the Go vet command on the packages named by the import paths.
+// Vet runs the Go vet tool (cmd/vet) on the named packages
+// and reports diagnostics.
 //
-// For more about vet and its flags, see 'go doc cmd/vet'.
-// For more about specifying packages, see 'go help packages'.
-// For a list of checkers and their flags, see 'go tool vet help'.
-// For details of a specific checker such as 'printf', see 'go tool vet help printf'.
+// It supports these flags:
 //
-// The -vettool=prog flag selects a different analysis tool with alternative
-// or additional checks.
-// For example, the 'shadow' analyzer can be built and run using these commands:
+//	  -c int
+//		display offending line with this many lines of context (default -1)
+//	  -json
+//		emit JSON output
+//	  -fix
+//		instead of printing each diagnostic, apply its first fix (if any)
+//	  -diff
+//		instead of applying each fix, print the patch as a unified diff
+//
+// The -vettool=prog flag selects a different analysis tool with
+// alternative or additional checks. For example, the 'shadow' analyzer
+// can be built and run using these commands:
 //
 //	go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@latest
 //	go vet -vettool=$(which shadow)
+//
+// Alternative vet tools should be built atop golang.org/x/tools/go/analysis/unitchecker,
+// which handles the interaction with go vet.
+//
+// The default vet tool is 'go tool vet' or cmd/vet.
+// For help on its checkers and their flags, run 'go tool vet help'.
+// For details of a specific checker such as 'printf', see 'go tool vet help printf'.
+//
+// For more about specifying packages, see 'go help packages'.
 //
 // The build flags supported by go vet are those that control package resolution
 // and execution, such as -C, -n, -x, -v, -tags, and -toolexec.
@@ -2343,7 +2389,7 @@
 //		The directory where 'go install' will install a command.
 //	GOCACHE
 //		The directory where the go command will store cached
-//		information for reuse in future builds.
+//		information for reuse in future builds. Must be an absolute path.
 //	GOCACHEPROG
 //		A command (with optional space-separated flags) that implements an
 //		external go command build cache.
@@ -2391,8 +2437,10 @@
 //		The name of checksum database to use and optionally its public key and
 //		URL. See https://golang.org/ref/mod#authenticating.
 //	GOTMPDIR
-//		The directory where the go command will write
-//		temporary source files, packages, and binaries.
+//		Temporary directory used by the go command and testing package.
+//		Overrides the platform-specific temporary directory such as "/tmp".
+//		The go command and testing package will write temporary source files,
+//		packages, and binaries here.
 //	GOTOOLCHAIN
 //		Controls which Go toolchain is used. See https://go.dev/doc/toolchain.
 //	GOVCS
@@ -2513,7 +2561,7 @@
 //		The default is GOFIPS140=off, which makes no FIPS-140 changes at all.
 //		Other values enable FIPS-140 compliance measures and select alternate
 //		versions of the cryptography source code.
-//		See https://go.dev/security/fips140 for details.
+//		See https://go.dev/doc/security/fips140 for details.
 //	GO_EXTLINK_ENABLED
 //		Whether the linker should use external linking mode
 //		when using -linkmode=auto with code that uses cgo.
@@ -2618,7 +2666,7 @@
 //		BlankLine     = '\n' .
 //
 //	Example:
-//		https://example.com/
+//		https://example.com
 //		https://example.net/api/
 //
 //		Authorization: Basic <token>
@@ -2953,6 +3001,11 @@
 //
 //	<meta name="go-import" content="import-prefix vcs repo-root">
 //
+// Starting in Go 1.25, an optional subdirectory will be recognized by the
+// go command:
+//
+//	<meta name="go-import" content="import-prefix vcs repo-root subdir">
+//
 // The import-prefix is the import path corresponding to the repository
 // root. It must be a prefix or an exact match of the package being
 // fetched with "go get". If it's not an exact match, another http
@@ -2966,6 +3019,12 @@
 //
 // The repo-root is the root of the version control system
 // containing a scheme and not containing a .vcs qualifier.
+//
+// The subdir specifies the directory within the repo-root where the
+// Go module's root (including its go.mod file) is located. It allows
+// you to organize your repository with the Go module code in a subdirectory
+// rather than directly at the repository's root.
+// If set, all vcs tags must be prefixed with "subdir". i.e. "subdir/v1.2.3"
 //
 // For example,
 //
@@ -2981,8 +3040,15 @@
 //	<meta name="go-import" content="example.org git https://code.org/r/p/exproj">
 //
 // the go tool will verify that https://example.org/?go-get=1 contains the
-// same meta tag and then git clone https://code.org/r/p/exproj into
-// GOPATH/src/example.org.
+// same meta tag and then download the code from the Git repository at https://code.org/r/p/exproj
+//
+// If that page contains the meta tag
+//
+//	<meta name="go-import" content="example.org git https://code.org/r/p/exproj foo/subdir">
+//
+// the go tool will verify that https://example.org/?go-get=1 contains the same meta
+// tag and then download the code from the "foo/subdir" subdirectory within the Git repository
+// at https://code.org/r/p/exproj
 //
 // Downloaded packages are stored in the module cache.
 // See https://golang.org/ref/mod#module-cache.
@@ -3199,11 +3265,15 @@
 //
 // Several of the flags control profiling and write an execution profile
 // suitable for "go tool pprof"; run "go tool pprof -h" for more
-// information. The --alloc_space, --alloc_objects, and --show_bytes
-// options of pprof control how the information is presented.
+// information. The -sample_index=alloc_space, -sample_index=alloc_objects,
+// and -show_bytes options of pprof control how the information is presented.
 //
 // The following flags are recognized by the 'go test' command and
 // control the execution of any test:
+//
+//	-artifacts
+//	    Save test artifacts in the directory specified by -outputdir.
+//	    See 'go doc testing.T.ArtifactDir'.
 //
 //	-bench regexp
 //	    Run only those benchmarks matching a regular expression.
@@ -3298,6 +3368,10 @@
 //	    expression. No tests, benchmarks, fuzz tests, or examples will be run.
 //	    This will only list top-level tests. No subtest or subbenchmarks will be
 //	    shown.
+//
+//	-outputdir directory
+//	    Place output files from profiling and test artifacts in the
+//	    specified directory, by default the directory in which "go test" is running.
 //
 //	-parallel n
 //	    Allow parallel execution of test functions that call t.Parallel, and
@@ -3409,10 +3483,6 @@
 //	-mutexprofilefraction n
 //	    Sample 1 in n stack traces of goroutines holding a
 //	    contended mutex.
-//
-//	-outputdir directory
-//	    Place output files from profiling in the specified directory,
-//	    by default the directory in which "go test" is running.
 //
 //	-trace trace.out
 //	    Write an execution trace to the specified file before exiting.

@@ -156,7 +156,7 @@ var S390XDWARFRegisters = map[int16]int16{}
 func init() {
 	// f assigns dwarfregisters[from:to by step] = (base):((to-from)/step+base)
 	f := func(from, step, to, base int16) {
-		for r := int16(from); r <= to; r += step {
+		for r := from; r <= to; r += step {
 			S390XDWARFRegisters[r] = (r-from)/step + base
 		}
 	}
@@ -329,6 +329,7 @@ const (
 	AFNABS
 	AFNEG
 	AFNEGS
+	ALCDBR
 	ALEDBR
 	ALDEBR
 	ALPDFR
@@ -443,6 +444,7 @@ const (
 	// storage-and-storage
 	AMVC
 	AMVCIN
+	AMVCLE
 	ACLC
 	AXC
 	AOC
@@ -713,6 +715,14 @@ const (
 	AWFLNDB
 	AVFLPDB
 	AWFLPDB
+	AVFMAXDB
+	AWFMAXDB
+	AVFMAXSB
+	AWFMAXSB
+	AVFMINDB
+	AWFMINDB
+	AVFMINSB
+	AWFMINSB
 	AVFSQ
 	AVFSQDB
 	AWFSQDB

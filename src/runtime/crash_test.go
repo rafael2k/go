@@ -10,6 +10,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"internal/asan"
+	"internal/msan"
+	"internal/profile"
+	"internal/race"
 	"internal/testenv"
 	traceparse "internal/trace"
 	"io"
@@ -165,6 +169,16 @@ func buildTestProg(t *testing.T, binary string, flags ...string) (string, error)
 		// Don't get confused if testenv.GoToolPath calls t.Skip.
 		target.err = errors.New("building test called t.Skip")
 
+		if asan.Enabled {
+			flags = append(flags, "-asan")
+		}
+		if msan.Enabled {
+			flags = append(flags, "-msan")
+		}
+		if race.Enabled {
+			flags = append(flags, "-race")
+		}
+
 		exe := filepath.Join(dir, name+".exe")
 
 		start := time.Now()
@@ -173,18 +187,19 @@ func buildTestProg(t *testing.T, binary string, flags ...string) (string, error)
 		cmd.Dir = "testdata/" + binary
 		cmd = testenv.CleanCmdEnv(cmd)
 
-		// Add the rangefunc GOEXPERIMENT unconditionally since some tests depend on it.
-		// TODO(61405): Remove this once it's enabled by default.
+		// If tests need any experimental flags, add them here.
+		//
+		// TODO(vsaioc): Remove `goroutineleakprofile` once the feature is no longer experimental.
 		edited := false
 		for i := range cmd.Env {
 			e := cmd.Env[i]
 			if _, vars, ok := strings.Cut(e, "GOEXPERIMENT="); ok {
-				cmd.Env[i] = "GOEXPERIMENT=" + vars + ",rangefunc"
-				edited = true
+				cmd.Env[i] = "GOEXPERIMENT=" + vars + ",goroutineleakprofile"
+				edited, _ = true, vars
 			}
 		}
 		if !edited {
-			cmd.Env = append(cmd.Env, "GOEXPERIMENT=rangefunc")
+			cmd.Env = append(cmd.Env, "GOEXPERIMENT=goroutineleakprofile")
 		}
 
 		out, err := cmd.CombinedOutput()
@@ -215,6 +230,9 @@ func testCrashHandler(t *testing.T, cgo bool) {
 	}
 	var output string
 	if cgo {
+		if runtime.GOOS == "freebsd" && race.Enabled {
+			t.Skipf("race + cgo freebsd not supported. See https://go.dev/issue/73788.")
+		}
 		output = runTestProg(t, "testprogcgo", "Crash")
 	} else {
 		output = runTestProg(t, "testprog", "Crash")
@@ -229,9 +247,17 @@ func TestCrashHandler(t *testing.T) {
 	testCrashHandler(t, false)
 }
 
+var deadlockBuildTypes = testenv.SpecialBuildTypes{
+	// External linking brings in cgo, causing deadlock detection not working.
+	Cgo:  false,
+	Asan: asan.Enabled,
+	Msan: msan.Enabled,
+	Race: race.Enabled,
+}
+
 func testDeadlock(t *testing.T, name string) {
 	// External linking brings in cgo, causing deadlock detection not working.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t, deadlockBuildTypes)
 
 	output := runTestProg(t, "testprog", name)
 	want := "fatal error: all goroutines are asleep - deadlock!\n"
@@ -258,7 +284,7 @@ func TestLockedDeadlock2(t *testing.T) {
 
 func TestGoexitDeadlock(t *testing.T) {
 	// External linking brings in cgo, causing deadlock detection not working.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t, deadlockBuildTypes)
 
 	output := runTestProg(t, "testprog", "GoexitDeadlock")
 	want := "no goroutines (main called runtime.Goexit) - deadlock!"
@@ -356,19 +382,19 @@ panic: third panic
 
 }
 
-func TestReraisedPanic(t *testing.T) {
-	output := runTestProg(t, "testprog", "ReraisedPanic")
-	want := `panic: message [recovered, reraised]
+func TestRepanickedPanic(t *testing.T) {
+	output := runTestProg(t, "testprog", "RepanickedPanic")
+	want := `panic: message [recovered, repanicked]
 `
 	if !strings.HasPrefix(output, want) {
 		t.Fatalf("output does not start with %q:\n%s", want, output)
 	}
 }
 
-func TestReraisedMiddlePanic(t *testing.T) {
-	output := runTestProg(t, "testprog", "ReraisedMiddlePanic")
+func TestRepanickedMiddlePanic(t *testing.T) {
+	output := runTestProg(t, "testprog", "RepanickedMiddlePanic")
 	want := `panic: inner [recovered]
-	panic: middle [recovered, reraised]
+	panic: middle [recovered, repanicked]
 	panic: outer
 `
 	if !strings.HasPrefix(output, want) {
@@ -376,8 +402,8 @@ func TestReraisedMiddlePanic(t *testing.T) {
 	}
 }
 
-func TestReraisedPanicSandwich(t *testing.T) {
-	output := runTestProg(t, "testprog", "ReraisedPanicSandwich")
+func TestRepanickedPanicSandwich(t *testing.T) {
+	output := runTestProg(t, "testprog", "RepanickedPanicSandwich")
 	want := `panic: outer [recovered]
 	panic: inner [recovered]
 	panic: outer
@@ -389,7 +415,7 @@ func TestReraisedPanicSandwich(t *testing.T) {
 
 func TestGoexitCrash(t *testing.T) {
 	// External linking brings in cgo, causing deadlock detection not working.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t, deadlockBuildTypes)
 
 	output := runTestProg(t, "testprog", "GoexitExit")
 	want := "no goroutines (main called runtime.Goexit) - deadlock!"
@@ -450,7 +476,7 @@ func TestBreakpoint(t *testing.T) {
 
 func TestGoexitInPanic(t *testing.T) {
 	// External linking brings in cgo, causing deadlock detection not working.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t, deadlockBuildTypes)
 
 	// see issue 8774: this code used to trigger an infinite recursion
 	output := runTestProg(t, "testprog", "GoexitInPanic")
@@ -517,7 +543,7 @@ func TestPanicAfterGoexit(t *testing.T) {
 
 func TestRecoveredPanicAfterGoexit(t *testing.T) {
 	// External linking brings in cgo, causing deadlock detection not working.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t, deadlockBuildTypes)
 
 	output := runTestProg(t, "testprog", "RecoveredPanicAfterGoexit")
 	want := "fatal error: no goroutines (main called runtime.Goexit) - deadlock!"
@@ -528,7 +554,7 @@ func TestRecoveredPanicAfterGoexit(t *testing.T) {
 
 func TestRecoverBeforePanicAfterGoexit(t *testing.T) {
 	// External linking brings in cgo, causing deadlock detection not working.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t, deadlockBuildTypes)
 
 	t.Parallel()
 	output := runTestProg(t, "testprog", "RecoverBeforePanicAfterGoexit")
@@ -540,7 +566,7 @@ func TestRecoverBeforePanicAfterGoexit(t *testing.T) {
 
 func TestRecoverBeforePanicAfterGoexit2(t *testing.T) {
 	// External linking brings in cgo, causing deadlock detection not working.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t, deadlockBuildTypes)
 
 	t.Parallel()
 	output := runTestProg(t, "testprog", "RecoverBeforePanicAfterGoexit2")
@@ -653,6 +679,9 @@ func TestConcurrentMapWrites(t *testing.T) {
 	if !*concurrentMapTest {
 		t.Skip("skipping without -run_concurrent_map_tests")
 	}
+	if race.Enabled {
+		t.Skip("skipping test: -race will catch the race, this test is for the built-in race detection")
+	}
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapWrites")
 	want := "fatal error: concurrent map writes\n"
@@ -666,6 +695,9 @@ func TestConcurrentMapWrites(t *testing.T) {
 func TestConcurrentMapReadWrite(t *testing.T) {
 	if !*concurrentMapTest {
 		t.Skip("skipping without -run_concurrent_map_tests")
+	}
+	if race.Enabled {
+		t.Skip("skipping test: -race will catch the race, this test is for the built-in race detection")
 	}
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapReadWrite")
@@ -681,6 +713,9 @@ func TestConcurrentMapIterateWrite(t *testing.T) {
 	if !*concurrentMapTest {
 		t.Skip("skipping without -run_concurrent_map_tests")
 	}
+	if race.Enabled {
+		t.Skip("skipping test: -race will catch the race, this test is for the built-in race detection")
+	}
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapIterateWrite")
 	want := "fatal error: concurrent map iteration and map write\n"
@@ -694,6 +729,9 @@ func TestConcurrentMapIterateWrite(t *testing.T) {
 
 func TestConcurrentMapWritesIssue69447(t *testing.T) {
 	testenv.MustHaveGoRun(t)
+	if race.Enabled {
+		t.Skip("skipping test: -race will catch the race, this test is for the built-in race detection")
+	}
 	exe, err := buildTestProg(t, "testprog")
 	if err != nil {
 		t.Fatal(err)
@@ -794,6 +832,9 @@ retry:
 }
 
 func TestBadTraceback(t *testing.T) {
+	if asan.Enabled || msan.Enabled || race.Enabled {
+		t.Skip("skipped test: checkptr mode catches the corruption")
+	}
 	output := runTestProg(t, "testprog", "BadTraceback")
 	for _, want := range []string{
 		"unexpected return pc",
@@ -813,6 +854,9 @@ func TestTimePprof(t *testing.T) {
 	switch runtime.GOOS {
 	case "aix", "darwin", "illumos", "openbsd", "solaris":
 		t.Skipf("skipping on %s because nanotime calls libc", runtime.GOOS)
+	}
+	if race.Enabled || asan.Enabled || msan.Enabled {
+		t.Skip("skipping on sanitizers because the sanitizer runtime is external code")
 	}
 
 	// Pass GOTRACEBACK for issue #41120 to try to get more
@@ -1086,7 +1130,9 @@ func TestPanicWhilePanicking(t *testing.T) {
 
 func TestPanicOnUnsafeSlice(t *testing.T) {
 	output := runTestProg(t, "testprog", "panicOnNilAndEleSizeIsZero")
-	want := "panic: runtime error: unsafe.Slice: ptr is nil and len is not zero"
+	// Note: This is normally a panic, but is a throw when checkptr is
+	// enabled.
+	want := "unsafe.Slice: ptr is nil and len is not zero"
 	if !strings.Contains(output, want) {
 		t.Errorf("output does not contain %q:\n%s", want, output)
 	}
@@ -1098,5 +1144,105 @@ func TestNetpollWaiters(t *testing.T) {
 	want := "OK\n"
 	if output != want {
 		t.Fatalf("output is not %q\n%s", want, output)
+	}
+}
+
+func TestFinalizerOrCleanupDeadlock(t *testing.T) {
+	t.Parallel()
+
+	for _, useCleanup := range []bool{false, true} {
+		progName := "Finalizer"
+		want := "runtime.runFinalizers"
+		if useCleanup {
+			progName = "Cleanup"
+			want = "runtime.runCleanups"
+		}
+
+		// The runtime.runFinalizers/runtime.runCleanups frame should appear in panics, even if
+		// runtime frames are normally hidden (GOTRACEBACK=all).
+		t.Run("Panic", func(t *testing.T) {
+			t.Parallel()
+			output := runTestProg(t, "testprog", progName+"Deadlock", "GOTRACEBACK=all", "GO_TEST_FINALIZER_DEADLOCK=panic")
+			want := want + "()"
+			if !strings.Contains(output, want) {
+				t.Errorf("output does not contain %q:\n%s", want, output)
+			}
+		})
+
+		// The runtime.runFinalizers/runtime.Cleanups frame should appear in runtime.Stack,
+		// even though runtime frames are normally hidden.
+		t.Run("Stack", func(t *testing.T) {
+			t.Parallel()
+			output := runTestProg(t, "testprog", progName+"Deadlock", "GO_TEST_FINALIZER_DEADLOCK=stack")
+			want := want + "()"
+			if !strings.Contains(output, want) {
+				t.Errorf("output does not contain %q:\n%s", want, output)
+			}
+		})
+
+		// The runtime.runFinalizers/runtime.Cleanups frame should appear in goroutine
+		// profiles.
+		t.Run("PprofProto", func(t *testing.T) {
+			t.Parallel()
+			output := runTestProg(t, "testprog", progName+"Deadlock", "GO_TEST_FINALIZER_DEADLOCK=pprof_proto")
+
+			p, err := profile.Parse(strings.NewReader(output))
+			if err != nil {
+				// Logging the binary proto data is not very nice, but it might
+				// be a text error message instead.
+				t.Logf("Output: %s", output)
+				t.Fatalf("Error parsing proto output: %v", err)
+			}
+			for _, s := range p.Sample {
+				for _, loc := range s.Location {
+					for _, line := range loc.Line {
+						if line.Function.Name == want {
+							// Done!
+							return
+						}
+					}
+				}
+			}
+			t.Errorf("Profile does not contain %q:\n%s", want, p)
+		})
+
+		// The runtime.runFinalizers/runtime.runCleanups frame should appear in goroutine
+		// profiles (debug=1).
+		t.Run("PprofDebug1", func(t *testing.T) {
+			t.Parallel()
+			output := runTestProg(t, "testprog", progName+"Deadlock", "GO_TEST_FINALIZER_DEADLOCK=pprof_debug1")
+			want := want + "+"
+			if !strings.Contains(output, want) {
+				t.Errorf("output does not contain %q:\n%s", want, output)
+			}
+		})
+
+		// The runtime.runFinalizers/runtime.runCleanups frame should appear in goroutine
+		// profiles (debug=2).
+		t.Run("PprofDebug2", func(t *testing.T) {
+			t.Parallel()
+			output := runTestProg(t, "testprog", progName+"Deadlock", "GO_TEST_FINALIZER_DEADLOCK=pprof_debug2")
+			want := want + "()"
+			if !strings.Contains(output, want) {
+				t.Errorf("output does not contain %q:\n%s", want, output)
+			}
+		})
+	}
+}
+
+func TestSynctestCondSignalFromNoBubble(t *testing.T) {
+	for _, test := range []string{
+		"SynctestCond/signal/no_bubble",
+		"SynctestCond/broadcast/no_bubble",
+		"SynctestCond/signal/other_bubble",
+		"SynctestCond/broadcast/other_bubble",
+	} {
+		t.Run(test, func(t *testing.T) {
+			output := runTestProg(t, "testprog", test)
+			want := "fatal error: semaphore wake of synctest goroutine from outside bubble"
+			if !strings.Contains(output, want) {
+				t.Fatalf("output:\n%s\n\nwant output containing: %s", output, want)
+			}
+		})
 	}
 }

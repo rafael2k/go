@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"runtime"
 	"slices"
+	"time"
 )
 
 // OpenInRoot opens the file name in the directory dir.
@@ -54,9 +55,9 @@ func OpenInRoot(dir, name string) (*File, error) {
 //
 //   - When GOOS=windows, file names may not reference Windows reserved device names
 //     such as NUL and COM1.
-//   - On Unix, [Root.Chmod] and [Root.Chown] are vulnerable to a race condition.
+//   - On Unix, [Root.Chmod], [Root.Chown], and [Root.Chtimes] are vulnerable to a race condition.
 //     If the target of the operation is changed from a regular file to a symlink
-//     while the operation is in progress, the operation may be peformed on the link
+//     while the operation is in progress, the operation may be performed on the link
 //     rather than the link target.
 //   - When GOOS=js, Root is vulnerable to TOCTOU (time-of-check-time-of-use)
 //     attacks in symlink validation, and cannot ensure that operations will not
@@ -144,12 +145,24 @@ func (r *Root) Chmod(name string, mode FileMode) error {
 // See [Mkdir] for more details.
 //
 // If perm contains bits other than the nine least-significant bits (0o777),
-// OpenFile returns an error.
+// Mkdir returns an error.
 func (r *Root) Mkdir(name string, perm FileMode) error {
 	if perm&0o777 != perm {
 		return &PathError{Op: "mkdirat", Path: name, Err: errors.New("unsupported file mode")}
 	}
 	return rootMkdir(r, name, perm)
+}
+
+// MkdirAll creates a new directory in the root, along with any necessary parents.
+// See [MkdirAll] for more details.
+//
+// If perm contains bits other than the nine least-significant bits (0o777),
+// MkdirAll returns an error.
+func (r *Root) MkdirAll(name string, perm FileMode) error {
+	if perm&0o777 != perm {
+		return &PathError{Op: "mkdirat", Path: name, Err: errors.New("unsupported file mode")}
+	}
+	return rootMkdirAll(r, name, perm)
 }
 
 // Chown changes the numeric uid and gid of the named file in the root.
@@ -158,10 +171,28 @@ func (r *Root) Chown(name string, uid, gid int) error {
 	return rootChown(r, name, uid, gid)
 }
 
+// Lchown changes the numeric uid and gid of the named file in the root.
+// See [Lchown] for more details.
+func (r *Root) Lchown(name string, uid, gid int) error {
+	return rootLchown(r, name, uid, gid)
+}
+
+// Chtimes changes the access and modification times of the named file in the root.
+// See [Chtimes] for more details.
+func (r *Root) Chtimes(name string, atime time.Time, mtime time.Time) error {
+	return rootChtimes(r, name, atime, mtime)
+}
+
 // Remove removes the named file or (empty) directory in the root.
 // See [Remove] for more details.
 func (r *Root) Remove(name string) error {
 	return rootRemove(r, name)
+}
+
+// RemoveAll removes the named file or directory and any children that it contains.
+// See [RemoveAll] for more details.
+func (r *Root) RemoveAll(name string) error {
+	return rootRemoveAll(r, name)
 }
 
 // Stat returns a [FileInfo] describing the named file in the root.
@@ -178,6 +209,68 @@ func (r *Root) Stat(name string) (FileInfo, error) {
 func (r *Root) Lstat(name string) (FileInfo, error) {
 	r.logStat(name)
 	return rootStat(r, name, true)
+}
+
+// Readlink returns the destination of the named symbolic link in the root.
+// See [Readlink] for more details.
+func (r *Root) Readlink(name string) (string, error) {
+	return rootReadlink(r, name)
+}
+
+// Rename renames (moves) oldname to newname.
+// Both paths are relative to the root.
+// See [Rename] for more details.
+func (r *Root) Rename(oldname, newname string) error {
+	return rootRename(r, oldname, newname)
+}
+
+// Link creates newname as a hard link to the oldname file.
+// Both paths are relative to the root.
+// See [Link] for more details.
+//
+// If oldname is a symbolic link, Link creates new link to oldname and not its target.
+// This behavior may differ from that of [Link] on some platforms.
+//
+// When GOOS=js, Link returns an error if oldname is a symbolic link.
+func (r *Root) Link(oldname, newname string) error {
+	return rootLink(r, oldname, newname)
+}
+
+// Symlink creates newname as a symbolic link to oldname.
+// See [Symlink] for more details.
+//
+// Symlink does not validate oldname,
+// which may reference a location outside the root.
+//
+// On Windows, a directory link is created if oldname references
+// a directory within the root. Otherwise a file link is created.
+func (r *Root) Symlink(oldname, newname string) error {
+	return rootSymlink(r, oldname, newname)
+}
+
+// ReadFile reads the named file in the root and returns its contents.
+// See [ReadFile] for more details.
+func (r *Root) ReadFile(name string) ([]byte, error) {
+	f, err := r.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readFileContents(statOrZero(f), f.Read)
+}
+
+// WriteFile writes data to the named file in the root, creating it if necessary.
+// See [WriteFile] for more details.
+func (r *Root) WriteFile(name string, data []byte, perm FileMode) error {
+	f, err := r.OpenFile(name, O_WRONLY|O_CREATE|O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return err
 }
 
 func (r *Root) logOpen(name string) {
@@ -204,26 +297,26 @@ func (r *Root) logStat(name string) {
 //
 // "." components are removed, except in the last component.
 //
-// Path separators following the last component are preserved.
-func splitPathInRoot(s string, prefix, suffix []string) (_ []string, err error) {
+// Path separators following the last component are returned in suffixSep.
+func splitPathInRoot(s string, prefix, suffix []string) (_ []string, suffixSep string, err error) {
 	if len(s) == 0 {
-		return nil, errors.New("empty path")
+		return nil, "", errors.New("empty path")
 	}
 	if IsPathSeparator(s[0]) {
-		return nil, errPathEscapes
+		return nil, "", errPathEscapes
 	}
 
 	if runtime.GOOS == "windows" {
 		// Windows cleans paths before opening them.
 		s, err = rootCleanPath(s, prefix, suffix)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		prefix = nil
 		suffix = nil
 	}
 
-	parts := append([]string{}, prefix...)
+	parts := slices.Clone(prefix)
 	i, j := 0, 1
 	for {
 		if j < len(s) && !IsPathSeparator(s[j]) {
@@ -233,13 +326,14 @@ func splitPathInRoot(s string, prefix, suffix []string) (_ []string, err error) 
 		}
 		parts = append(parts, s[i:j])
 		// Advance to the next component, or end of the path.
+		partEnd := j
 		for j < len(s) && IsPathSeparator(s[j]) {
 			j++
 		}
 		if j == len(s) {
 			// If this is the last path component,
 			// preserve any trailing path separators.
-			parts[len(parts)-1] = s[i:]
+			suffixSep = s[partEnd:]
 			break
 		}
 		if parts[len(parts)-1] == "." {
@@ -253,13 +347,13 @@ func splitPathInRoot(s string, prefix, suffix []string) (_ []string, err error) 
 		parts = parts[:len(parts)-1]
 	}
 	parts = append(parts, suffix...)
-	return parts, nil
+	return parts, suffixSep, nil
 }
 
 // FS returns a file system (an fs.FS) for the tree of files in the root.
 //
-// The result implements [io/fs.StatFS], [io/fs.ReadFileFS] and
-// [io/fs.ReadDirFS].
+// The result implements [io/fs.StatFS], [io/fs.ReadFileFS],
+// [io/fs.ReadDirFS], and [io/fs.ReadLinkFS].
 func (r *Root) FS() fs.FS {
 	return (*rootFS)(r)
 }
@@ -315,6 +409,14 @@ func (rfs *rootFS) ReadFile(name string) ([]byte, error) {
 	return readFileContents(statOrZero(f), f.Read)
 }
 
+func (rfs *rootFS) ReadLink(name string) (string, error) {
+	r := (*Root)(rfs)
+	if !isValidRootFSPath(name) {
+		return "", &PathError{Op: "readlink", Path: name, Err: ErrInvalid}
+	}
+	return r.Readlink(name)
+}
+
 func (rfs *rootFS) Stat(name string) (FileInfo, error) {
 	r := (*Root)(rfs)
 	if !isValidRootFSPath(name) {
@@ -323,7 +425,15 @@ func (rfs *rootFS) Stat(name string) (FileInfo, error) {
 	return r.Stat(name)
 }
 
-// isValidRootFSPath reprots whether name is a valid filename to pass a Root.FS method.
+func (rfs *rootFS) Lstat(name string) (FileInfo, error) {
+	r := (*Root)(rfs)
+	if !isValidRootFSPath(name) {
+		return nil, &PathError{Op: "lstat", Path: name, Err: ErrInvalid}
+	}
+	return r.Lstat(name)
+}
+
+// isValidRootFSPath reports whether name is a valid filename to pass a Root.FS method.
 func isValidRootFSPath(name string) bool {
 	if !fs.ValidPath(name) {
 		return false

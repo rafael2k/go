@@ -7,6 +7,7 @@ package ssa
 import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
+	"cmd/internal/obj"
 )
 
 // dse does dead-store elimination on the Function.
@@ -55,7 +56,7 @@ func dse(f *Func) {
 					}
 					continue
 				}
-				if v.Op == OpInlMark {
+				if v.Op == OpInlMark || v.Op == OpConvert {
 					// Not really a use of the memory. See #67957.
 					continue
 				}
@@ -118,7 +119,8 @@ func dse(f *Func) {
 					ptr = la
 				}
 			}
-			sr := shadowRange(shadowed.get(ptr.ID))
+			srNum, _ := shadowed.get(ptr.ID)
+			sr := shadowRange(srNum)
 			if sr.contains(off, off+sz) {
 				// Modify the store/zero into a copy of the memory state,
 				// effectively eliding the store operation.
@@ -156,9 +158,7 @@ func dse(f *Func) {
 
 // A shadowRange encodes a set of byte offsets [lo():hi()] from
 // a given pointer that will be written to later in the block.
-// A zero shadowRange encodes an empty shadowed range (and so
-// does a -1 shadowRange, which is what sparsemap.get returns
-// on a failed lookup).
+// A zero shadowRange encodes an empty shadowed range.
 type shadowRange int32
 
 func (sr shadowRange) lo() int64 {
@@ -214,7 +214,7 @@ func elimDeadAutosGeneric(f *Func) {
 		case OpAddr, OpLocalAddr:
 			// Propagate the address if it points to an auto.
 			n, ok := v.Aux.(*ir.Name)
-			if !ok || n.Class != ir.PAUTO {
+			if !ok || (n.Class != ir.PAUTO && !isABIInternalParam(f, n)) {
 				return
 			}
 			if addr[v] == nil {
@@ -225,7 +225,7 @@ func elimDeadAutosGeneric(f *Func) {
 		case OpVarDef:
 			// v should be eliminated if we eliminate the auto.
 			n, ok := v.Aux.(*ir.Name)
-			if !ok || n.Class != ir.PAUTO {
+			if !ok || (n.Class != ir.PAUTO && !isABIInternalParam(f, n)) {
 				return
 			}
 			if elim[v] == nil {
@@ -241,7 +241,7 @@ func elimDeadAutosGeneric(f *Func) {
 			// may not be used by the inline code, but will be used by
 			// panic processing).
 			n, ok := v.Aux.(*ir.Name)
-			if !ok || n.Class != ir.PAUTO {
+			if !ok || (n.Class != ir.PAUTO && !isABIInternalParam(f, n)) {
 				return
 			}
 			if !used.Has(n) {
@@ -374,7 +374,7 @@ func elimUnreadAutos(f *Func) {
 			if !ok {
 				continue
 			}
-			if n.Class != ir.PAUTO {
+			if n.Class != ir.PAUTO && !isABIInternalParam(f, n) {
 				continue
 			}
 
@@ -413,4 +413,17 @@ func elimUnreadAutos(f *Func) {
 		store.AuxInt = 0
 		store.Op = OpCopy
 	}
+}
+
+// isABIInternalParam returns whether n is a parameter of an ABIInternal
+// function. For dead store elimination, we can treat parameters the same
+// way as autos. Storing to a parameter can be removed if it is not read
+// or address-taken.
+//
+// We check ABI here because for a cgo_unsafe_arg function (which is ABI0),
+// all the args are effectively address-taken, but not necessarily have
+// an Addr or LocalAddr op. We could probably just check for cgo_unsafe_arg,
+// but ABIInternal is mostly what matters.
+func isABIInternalParam(f *Func, n *ir.Name) bool {
+	return n.Class == ir.PPARAM && f.ABISelf.Which() == obj.ABIInternal
 }

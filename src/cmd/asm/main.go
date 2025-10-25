@@ -49,6 +49,7 @@ func main() {
 	ctxt.Debugpcln = flags.DebugFlags.PCTab
 	ctxt.IsAsm = true
 	ctxt.Pkgpath = *flags.Importpath
+	ctxt.DwTextCount = objabi.DummyDwarfFunctionCountForAssembler()
 	switch *flags.Spectre {
 	default:
 		log.Printf("unknown setting -spectre=%s", *flags.Spectre)
@@ -57,7 +58,7 @@ func main() {
 		// nothing
 	case "index":
 		// known to compiler; ignore here so people can use
-		// the same list with -gcflags=-spectre=LIST and -asmflags=-spectrre=LIST
+		// the same list with -gcflags=-spectre=LIST and -asmflags=-spectre=LIST
 	case "all", "ret":
 		ctxt.Retpoline = true
 	}

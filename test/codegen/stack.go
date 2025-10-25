@@ -6,7 +6,10 @@
 
 package codegen
 
-import "runtime"
+import (
+	"runtime"
+	"unsafe"
+)
 
 // This file contains code generation tests related to the use of the
 // stack.
@@ -128,6 +131,29 @@ func spillSlotReuse() {
 	getp2()[nopInt()] = 0
 }
 
+// Check that no stack frame space is needed for simple slice initialization with underlying structure.
+type mySlice struct {
+	array unsafe.Pointer
+	len   int
+	cap   int
+}
+
+// amd64:"TEXT\t.*, [$]0-"
+func sliceInit(base uintptr) []uintptr {
+	const ptrSize = 8
+	size := uintptr(4096)
+	bitmapSize := size / ptrSize / 8
+	elements := int(bitmapSize / ptrSize)
+	var sl mySlice
+	sl = mySlice{
+		unsafe.Pointer(base + size - bitmapSize),
+		elements,
+		elements,
+	}
+	// amd64:-"POPQ",-"SP"
+	return *(*[]uintptr)(unsafe.Pointer(&sl))
+}
+
 //go:noinline
 func nopInt() int {
 	return 0
@@ -141,4 +167,10 @@ func getp1() *[4]int {
 //go:noinline
 func getp2() *[4]int {
 	return nil
+}
+
+// Store to an argument without read can be removed.
+func storeArg(a [2]int) {
+	// amd64:-`MOVQ\t\$123,.*\.a\+\d+\(SP\)`
+	a[1] = 123
 }

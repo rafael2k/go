@@ -66,11 +66,13 @@ func ExampleJoin() {
 	if errors.Is(err, err2) {
 		fmt.Println("err is err2")
 	}
+	fmt.Println(err.(interface{ Unwrap() []error }).Unwrap())
 	// Output:
 	// err1
 	// err2
 	// err is err1
 	// err is err2
+	// [err1 err2]
 }
 
 func ExampleIs() {
@@ -96,6 +98,18 @@ func ExampleAs() {
 		}
 	}
 
+	// Output:
+	// Failed at path: non-existing
+}
+
+func ExampleAsType() {
+	if _, err := os.Open("non-existing"); err != nil {
+		if pathError, ok := errors.AsType[*fs.PathError](err); ok {
+			fmt.Println("Failed at path:", pathError.Path)
+		} else {
+			fmt.Println(err)
+		}
+	}
 	// Output:
 	// Failed at path: non-existing
 }

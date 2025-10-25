@@ -181,10 +181,14 @@ func (z *Int) Sub(x, y *Int) *Int {
 
 // Mul sets z to the product x*y and returns z.
 func (z *Int) Mul(x, y *Int) *Int {
-	return z.mul(nil, x, y)
+	z.mul(nil, x, y)
+	return z
 }
 
-func (z *Int) mul(stk *stack, x, y *Int) *Int {
+// mul is like Mul but takes an explicit stack to use, for internal use.
+// It does not return a *Int because doing so makes the stack-allocated Ints
+// used in natmul.go escape to the heap (even though the result is unused).
+func (z *Int) mul(stk *stack, x, y *Int) {
 	// x * y == x * y
 	// x * (-y) == -(x * y)
 	// (-x) * y == -(x * y)
@@ -192,11 +196,10 @@ func (z *Int) mul(stk *stack, x, y *Int) *Int {
 	if x == y {
 		z.abs = z.abs.sqr(stk, x.abs)
 		z.neg = false
-		return z
+		return
 	}
 	z.abs = z.abs.mul(stk, x.abs, y.abs)
 	z.neg = len(z.abs) > 0 && x.neg != y.neg // 0 has no sign
-	return z
 }
 
 // MulRange sets z to the product of all integers
@@ -1094,7 +1097,7 @@ func (z *Int) ModSqrt(x, p *Int) *Int {
 
 // Lsh sets z = x << n and returns z.
 func (z *Int) Lsh(x *Int, n uint) *Int {
-	z.abs = z.abs.shl(x.abs, n)
+	z.abs = z.abs.lsh(x.abs, n)
 	z.neg = x.neg
 	return z
 }
@@ -1104,13 +1107,13 @@ func (z *Int) Rsh(x *Int, n uint) *Int {
 	if x.neg {
 		// (-x) >> s == ^(x-1) >> s == ^((x-1) >> s) == -(((x-1) >> s) + 1)
 		t := z.abs.sub(x.abs, natOne) // no underflow because |x| > 0
-		t = t.shr(t, n)
+		t = t.rsh(t, n)
 		z.abs = t.add(t, natOne)
 		z.neg = true // z cannot be zero if x is negative
 		return z
 	}
 
-	z.abs = z.abs.shr(x.abs, n)
+	z.abs = z.abs.rsh(x.abs, n)
 	z.neg = false
 	return z
 }

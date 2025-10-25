@@ -60,19 +60,18 @@ if not exist ..\bin\tool mkdir ..\bin\tool
 :: Calculating GOROOT_BOOTSTRAP
 if not "x%GOROOT_BOOTSTRAP%"=="x" goto bootstrapset
 for /f "tokens=*" %%g in ('where go 2^>nul') do (
-	if "x%GOROOT_BOOTSTRAP%"=="x" (
-		setlocal
-		call :nogoenv
-		for /f "tokens=*" %%i in ('"%%g" env GOROOT 2^>nul') do (
-			endlocal
-			if /I not "%%i"=="%GOROOT_TEMP%" (
-				set GOROOT_BOOTSTRAP=%%i
-			)
+	setlocal
+	call :nogoenv
+	for /f "tokens=*" %%i in ('"%%g" env GOROOT 2^>nul') do (
+		endlocal
+		if /I not "%%i"=="%GOROOT_TEMP%" (
+			set GOROOT_BOOTSTRAP=%%i
+			goto bootstrapset
 		)
 	)
 )
 
-set bootgo=1.22.6
+set bootgo=1.24.6
 if "x%GOROOT_BOOTSTRAP%"=="x" if exist "%HOMEDRIVE%%HOMEPATH%\go%bootgo%" set GOROOT_BOOTSTRAP=%HOMEDRIVE%%HOMEPATH%\go%bootgo%
 if "x%GOROOT_BOOTSTRAP%"=="x" if exist "%HOMEDRIVE%%HOMEPATH%\sdk\go%bootgo%" set GOROOT_BOOTSTRAP=%HOMEDRIVE%%HOMEPATH%\sdk\go%bootgo%
 if "x%GOROOT_BOOTSTRAP%"=="x" set GOROOT_BOOTSTRAP=%HOMEDRIVE%%HOMEPATH%\Go1.4

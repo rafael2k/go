@@ -470,6 +470,10 @@ func TestLOONG64Encoder(t *testing.T) {
 	testEndToEnd(t, "loong64", "loong64")
 }
 
+func TestLOONG64Errors(t *testing.T) {
+	testErrors(t, "loong64", "loong64error")
+}
+
 func TestPPC64EndToEnd(t *testing.T) {
 	defer func(old int) { buildcfg.GOPPC64 = old }(buildcfg.GOPPC64)
 	for _, goppc64 := range []int{8, 9, 10} {
@@ -487,6 +491,10 @@ func TestRISCVEndToEnd(t *testing.T) {
 
 func TestRISCVErrors(t *testing.T) {
 	testErrors(t, "riscv64", "riscv64error")
+}
+
+func TestRISCVValidation(t *testing.T) {
+	testErrors(t, "riscv64", "riscv64validation")
 }
 
 func TestS390XEndToEnd(t *testing.T) {

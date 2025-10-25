@@ -511,10 +511,10 @@ func f19() (e int64, err error) {
 
 func sm1(b []int, x int) {
 	// Test constant argument to slicemask.
-	useSlice(b[2:8]) // ERROR "Proved slicemask not needed$"
+	useSlice(b[2:8]) // optimized away earlier by rewrite
 	// Test non-constant argument with known limits.
 	if cap(b) > 10 {
-		useSlice(b[2:])
+		useSlice(b[2:]) // ERROR "Proved slicemask not needed$"
 	}
 }
 
@@ -773,8 +773,8 @@ func indexGT0(b []byte, n int) {
 func unrollUpExcl(a []int) int {
 	var i, x int
 	for i = 0; i < len(a)-1; i += 2 { // ERROR "Induction variable: limits \[0,\?\), increment 2$"
-		x += a[i] // ERROR "Proved IsInBounds$"
-		x += a[i+1]
+		x += a[i]   // ERROR "Proved IsInBounds$"
+		x += a[i+1] // ERROR "Proved IsInBounds( for blocked indexing)?$"
 	}
 	if i == len(a)-1 {
 		x += a[i]
@@ -786,8 +786,8 @@ func unrollUpExcl(a []int) int {
 func unrollUpIncl(a []int) int {
 	var i, x int
 	for i = 0; i <= len(a)-2; i += 2 { // ERROR "Induction variable: limits \[0,\?\], increment 2$"
-		x += a[i] // ERROR "Proved IsInBounds$"
-		x += a[i+1]
+		x += a[i]   // ERROR "Proved IsInBounds$"
+		x += a[i+1] // ERROR "Proved IsInBounds( for blocked indexing)?$"
 	}
 	if i == len(a)-1 {
 		x += a[i]
@@ -839,7 +839,7 @@ func unrollExclStepTooLarge(a []int) int {
 	var i, x int
 	for i = 0; i < len(a)-1; i += 3 {
 		x += a[i]
-		x += a[i+1]
+		x += a[i+1] // ERROR "Proved IsInBounds( for blocked indexing)?$"
 	}
 	if i == len(a)-1 {
 		x += a[i]
@@ -852,7 +852,7 @@ func unrollInclStepTooLarge(a []int) int {
 	var i, x int
 	for i = 0; i <= len(a)-2; i += 3 {
 		x += a[i]
-		x += a[i+1]
+		x += a[i+1] // ERROR "Proved IsInBounds( for blocked indexing)?$"
 	}
 	if i == len(a)-1 {
 		x += a[i]
@@ -1391,8 +1391,8 @@ func bitLen8(x uint8, ensureBothBranchesCouldHappen bool) int {
 }
 
 func xor64(a, b uint64, ensureBothBranchesCouldHappen bool) int {
-	a &= 0xff
-	b &= 0xfff
+	a = min(a, 0xff)
+	b = min(b, 0xfff)
 
 	z := a ^ b
 
@@ -1409,8 +1409,8 @@ func xor64(a, b uint64, ensureBothBranchesCouldHappen bool) int {
 }
 
 func or64(a, b uint64, ensureBothBranchesCouldHappen bool) int {
-	a &= 0xff
-	b &= 0xfff
+	a = min(a, 0xff)
+	b = min(b, 0xfff)
 
 	z := a | b
 
@@ -1427,8 +1427,8 @@ func or64(a, b uint64, ensureBothBranchesCouldHappen bool) int {
 }
 
 func mod64uWithSmallerDividendMax(a, b uint64, ensureBothBranchesCouldHappen bool) int {
-	a &= 0xff
-	b &= 0xfff
+	a = min(a, 0xff)
+	b = min(b, 0xfff)
 
 	z := bits.Len64(a % b) // see go.dev/issue/68857 for bits.Len64
 
@@ -1444,8 +1444,8 @@ func mod64uWithSmallerDividendMax(a, b uint64, ensureBothBranchesCouldHappen boo
 	return z
 }
 func mod64uWithSmallerDivisorMax(a, b uint64, ensureBothBranchesCouldHappen bool) int {
-	a &= 0xfff
-	b &= 0x10 // we need bits.Len64(b.umax) != bits.Len64(b.umax-1)
+	a = min(a, 0xfff)
+	b = min(b, 0x10) // we need bits.Len64(b.umax) != bits.Len64(b.umax-1)
 
 	z := bits.Len64(a % b) // see go.dev/issue/68857 for bits.Len64
 
@@ -1461,8 +1461,8 @@ func mod64uWithSmallerDivisorMax(a, b uint64, ensureBothBranchesCouldHappen bool
 	return z
 }
 func mod64uWithIdenticalMax(a, b uint64, ensureBothBranchesCouldHappen bool) int {
-	a &= 0x10
-	b &= 0x10 // we need bits.Len64(b.umax) != bits.Len64(b.umax-1)
+	a = min(a, 0x10)
+	b = min(b, 0x10) // we need bits.Len64(b.umax) != bits.Len64(b.umax-1)
 
 	z := bits.Len64(a % b) // see go.dev/issue/68857 for bits.Len64
 
@@ -1481,8 +1481,8 @@ func mod64sPositiveWithSmallerDividendMax(a, b int64, ensureBothBranchesCouldHap
 	if a < 0 || b < 0 {
 		return 42
 	}
-	a &= 0xff
-	b &= 0xfff
+	a = min(a, 0xff)
+	b = min(b, 0xfff)
 
 	z := a % b // ERROR "Proved Mod64 does not need fix-up$"
 
@@ -1501,8 +1501,8 @@ func mod64sPositiveWithSmallerDivisorMax(a, b int64, ensureBothBranchesCouldHapp
 	if a < 0 || b < 0 {
 		return 42
 	}
-	a &= 0xfff
-	b &= 0xff
+	a = min(a, 0xfff)
+	b = min(b, 0xff)
 
 	z := a % b // ERROR "Proved Mod64 does not need fix-up$"
 
@@ -1521,8 +1521,8 @@ func mod64sPositiveWithIdenticalMax(a, b int64, ensureBothBranchesCouldHappen bo
 	if a < 0 || b < 0 {
 		return 42
 	}
-	a &= 0xfff
-	b &= 0xfff
+	a = min(a, 0xfff)
+	b = min(b, 0xfff)
 
 	z := a % b // ERROR "Proved Mod64 does not need fix-up$"
 
@@ -1539,10 +1539,10 @@ func mod64sPositiveWithIdenticalMax(a, b int64, ensureBothBranchesCouldHappen bo
 }
 
 func div64u(a, b uint64, ensureAllBranchesCouldHappen func() bool) uint64 {
-	a &= 0xffff
-	a |= 0xfff
-	b &= 0xff
-	b |= 0xf
+	a = min(a, 0xffff)
+	a = max(a, 0xfff)
+	b = min(b, 0xff)
+	b = max(b, 0xf)
 
 	z := a / b // ERROR "Proved Neq64$"
 
@@ -1564,10 +1564,10 @@ func div64s(a, b int64, ensureAllBranchesCouldHappen func() bool) int64 {
 	if a < 0 || b < 0 {
 		return 42
 	}
-	a &= 0xffff
-	a |= 0xfff
-	b &= 0xff
-	b |= 0xf
+	a = min(a, 0xffff)
+	a = max(a, 0xfff)
+	b = min(b, 0xff)
+	b = max(b, 0xf)
 
 	z := a / b // ERROR "(Proved Div64 does not need fix-up|Proved Neq64)$"
 
@@ -1587,8 +1587,8 @@ func div64s(a, b int64, ensureAllBranchesCouldHappen func() bool) int64 {
 }
 
 func trunc64to16(a uint64, ensureAllBranchesCouldHappen func() bool) uint16 {
-	a &= 0xfff
-	a |= 0xff
+	a = min(a, 0xfff)
+	a = max(a, 0xff)
 
 	z := uint16(a)
 	if ensureAllBranchesCouldHappen() && z > 0xfff { // ERROR "Disproved Less16U$"
@@ -1607,8 +1607,8 @@ func trunc64to16(a uint64, ensureAllBranchesCouldHappen func() bool) uint16 {
 }
 
 func com64(a uint64, ensureAllBranchesCouldHappen func() bool) uint64 {
-	a &= 0xffff
-	a |= 0xff
+	a = min(a, 0xffff)
+	a = max(a, 0xff)
 
 	z := ^a
 
@@ -1629,8 +1629,8 @@ func com64(a uint64, ensureAllBranchesCouldHappen func() bool) uint64 {
 
 func neg64(a uint64, ensureAllBranchesCouldHappen func() bool) uint64 {
 	var lo, hi uint64 = 0xff, 0xfff
-	a &= hi
-	a |= lo
+	a = min(a, hi)
+	a = max(a, lo)
 
 	z := -a
 
@@ -1650,8 +1650,8 @@ func neg64(a uint64, ensureAllBranchesCouldHappen func() bool) uint64 {
 }
 func neg64mightOverflowDuringNeg(a uint64, ensureAllBranchesCouldHappen func() bool) uint64 {
 	var lo, hi uint64 = 0, 0xfff
-	a &= hi
-	a |= lo
+	a = min(a, hi)
+	a = max(a, lo)
 
 	z := -a
 
@@ -1691,6 +1691,317 @@ func phiMin(a, b []byte) {
 	_ = b[:y] // ERROR "Proved IsSliceInBounds"
 }
 
+func minPhiLeq[T uint | int](x, y T) (z T) {
+	if x <= y {
+		z = x
+	} else {
+		z = y
+	}
+	return z
+}
+func maxPhiLeq[T uint | int](x, y T) (z T) {
+	if y <= x {
+		z = x
+	} else {
+		z = y
+	}
+	return z
+}
+func mathBasedOnPhiLosangeMinUFirstLeq(x uint, ensureAllBranchesCouldHappen func() bool) uint {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = minPhiLeq(x, maxc)
+	x = maxPhiLeq(x, minc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64U$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64U$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64U$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64U$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiLosangeMinUSecondLeq(x uint, ensureAllBranchesCouldHappen func() bool) uint {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = maxPhiLeq(x, minc)
+	x = minPhiLeq(x, maxc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64U$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64U$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64U$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64U$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiLosangeMinFirstLeq(x int, ensureAllBranchesCouldHappen func() bool) int {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = minPhiLeq(x, maxc)
+	x = maxPhiLeq(x, minc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiLosangeMinSecondLeq(x int, ensureAllBranchesCouldHappen func() bool) int {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = maxPhiLeq(x, minc)
+	x = minPhiLeq(x, maxc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64$"
+		return 42424242
+	}
+	return x
+}
+
+func minPhiLess[T uint | int](x, y T) (z T) {
+	if x < y {
+		z = x
+	} else {
+		z = y
+	}
+	return z
+}
+func maxPhiLess[T uint | int](x, y T) (z T) {
+	if y < x {
+		z = x
+	} else {
+		z = y
+	}
+	return z
+}
+func mathBasedOnPhiLosangeMinUFirstLess(x uint, ensureAllBranchesCouldHappen func() bool) uint {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = minPhiLess(x, maxc)
+	x = maxPhiLess(x, minc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64U$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64U$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64U$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64U$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiLosangeMinUSecondLess(x uint, ensureAllBranchesCouldHappen func() bool) uint {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = maxPhiLess(x, minc)
+	x = minPhiLess(x, maxc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64U$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64U$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64U$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64U$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiLosangeMinFirstLess(x int, ensureAllBranchesCouldHappen func() bool) int {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = minPhiLess(x, maxc)
+	x = maxPhiLess(x, minc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiLosangeMinSecondLess(x int, ensureAllBranchesCouldHappen func() bool) int {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = maxPhiLess(x, minc)
+	x = minPhiLess(x, maxc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64$"
+		return 42424242
+	}
+	return x
+}
+
+func mathBasedOnPhiBuiltinMinUFirst(x uint, ensureAllBranchesCouldHappen func() bool) uint {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = min(x, maxc)
+	x = max(x, minc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64U$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64U$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64U$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64U$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiBuiltinMinUSecond(x uint, ensureAllBranchesCouldHappen func() bool) uint {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = max(x, minc)
+	x = min(x, maxc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64U$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64U$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64U$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64U$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiBuiltinMinFirst(x int, ensureAllBranchesCouldHappen func() bool) int {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = min(x, maxc)
+	x = max(x, minc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64$"
+		return 42424242
+	}
+	return x
+}
+func mathBasedOnPhiBuiltinMinSecond(x int, ensureAllBranchesCouldHappen func() bool) int {
+	const maxc = 0xf2a
+	const minc = 0xf0a
+	x = max(x, minc)
+	x = min(x, maxc)
+
+	const k = 1
+	x += k
+
+	if ensureAllBranchesCouldHappen() && x > maxc+k { // ERROR "Disproved Less64$"
+		return 42
+	}
+	if ensureAllBranchesCouldHappen() && x <= maxc+k { // ERROR "Proved Leq64$"
+		return 4242
+	}
+	if ensureAllBranchesCouldHappen() && x < minc+k { // ERROR "Disproved Less64$"
+		return 424242
+	}
+	if ensureAllBranchesCouldHappen() && x >= minc+k { // ERROR "Proved Leq64$"
+		return 42424242
+	}
+	return x
+}
+
 func issue16833(a, b []byte) {
 	n := copy(a, b)
 	_ = a[n:] // ERROR "Proved IsSliceInBounds"
@@ -1728,6 +2039,449 @@ func cvtBoolToUint8BCE(b bool, a [2]int64) int64 {
 		c = 1
 	}
 	return a[c] // ERROR "Proved IsInBounds$"
+}
+
+func transitiveProofsThroughNonOverflowingUnsignedAdd(x, y, z uint64) {
+	x &= 1<<63 - 1
+	y &= 1<<63 - 1
+
+	a := x + y
+	if a > z {
+		return
+	}
+
+	if x > z { // ERROR "Disproved Less64U$"
+		return
+	}
+	if y > z { // ERROR "Disproved Less64U$"
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	x |= 1
+	y |= 1
+	a = x + y
+	if a == x { // ERROR "Disproved Eq64$"
+		return
+	}
+	if a == y { // ERROR "Disproved Eq64$"
+		return
+	}
+}
+
+func transitiveProofsThroughOverflowingUnsignedAdd(x, y, z uint64) {
+	a := x + y
+	if a > z {
+		return
+	}
+
+	if x > z {
+		return
+	}
+	if y > z {
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	x |= 1
+	y |= 1
+	a = x + y
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+}
+
+func transitiveProofsThroughNonOverflowingSignedAddPositive(x, y, z int64) {
+	x &= 1<<62 - 1
+	y &= 1<<62 - 1
+
+	a := x + y
+	if a > z {
+		return
+	}
+
+	if x > z { // ERROR "Disproved Less64$"
+		return
+	}
+	if y > z { // ERROR "Disproved Less64$"
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	x |= 1
+	y |= 1
+	a = x + y
+	if a == x { // ERROR "Disproved Eq64$"
+		return
+	}
+	if a == y { // ERROR "Disproved Eq64$"
+		return
+	}
+}
+
+func transitiveProofsThroughOverflowingSignedAddPositive(x, y, z int64) {
+	if x < 0 || y < 0 {
+		return
+	}
+
+	a := x + y
+	if a > z {
+		return
+	}
+
+	if x > z {
+		return
+	}
+	if y > z {
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	x |= 1
+	y |= 1
+	a = x + y
+	if a == x { // ERROR "Disproved Eq64$"
+		return
+	}
+	if a == y { // ERROR "Disproved Eq64$"
+		return
+	}
+}
+
+func transitiveProofsThroughNonOverflowingSignedAddNegative(x, y, z int64) {
+	if x < math.MinInt64>>1 || x > 0 ||
+		y < math.MinInt64>>1 || y > 0 {
+		return
+	}
+
+	a := x + y
+	if a < z {
+		return
+	}
+
+	if x < z { // ERROR "Disproved Less64$"
+		return
+	}
+	if y < z { // ERROR "Disproved Less64$"
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	if x == 0 && y == 0 {
+		return
+	}
+	a = x + y
+	if a == x { // ERROR "Disproved Eq64$"
+		return
+	}
+	if a == y { // ERROR "Disproved Eq64$"
+		return
+	}
+}
+
+func transitiveProofsThroughOverflowingSignedAddNegative(x, y, z int64) {
+	if x >= 0 || y >= 0 {
+		return
+	}
+
+	a := x + y
+	if a < z {
+		return
+	}
+
+	if x < z {
+		return
+	}
+	if y < z {
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	x |= 1
+	y |= 1
+	a = x + y
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+}
+
+func transitiveProofsThroughNonOverflowingUnsignedSub(x, y, z uint64) {
+	x |= 0xfff
+	y &= 0xfff
+
+	a := x - y
+	if a < z {
+		return
+	}
+
+	if x < z { // ERROR "Disproved Less64U$"
+		return
+	}
+	if y < z {
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	y |= 1
+	a = x - y
+	if a == x { // ERROR "Disproved Eq64$"
+		return
+	}
+	if a == y {
+		return
+	}
+}
+
+func transitiveProofsThroughOverflowingUnsignedSub(x, y, z uint64) {
+	a := x - y
+	if a < z {
+		return
+	}
+
+	if x < z {
+		return
+	}
+	if y < z {
+		return
+	}
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+
+	y |= 1
+	a = x - y
+	if a == x {
+		return
+	}
+	if a == y {
+		return
+	}
+}
+
+func resliceString(s string) byte {
+	if len(s) >= 4 {
+		s = s[2:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
+		s = s[1:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
+		return s[0] // ERROR "Proved IsInBounds"
+	}
+	return 0
+}
+func resliceBytes(b []byte) byte {
+	if len(b) >= 4 {
+		b = b[2:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
+		b = b[1:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
+		return b[0] // ERROR "Proved IsInBounds"
+	}
+	return 0
+}
+
+func issue74473(s []uint) {
+	i := 0
+	for {
+		if i >= len(s) { // ERROR "Induction variable: limits \[0,\?\), increment 1$"
+			break
+		}
+		_ = s[i] // ERROR "Proved IsInBounds$"
+		i++
+	}
+}
+
+func setCapMaxBasedOnElementSize(x []uint64) int {
+	c := uintptr(cap(x))
+	max := ^uintptr(0) >> 3
+	if c > max { // ERROR "Disproved Less"
+		return 42
+	}
+	if c <= max { // ERROR "Proved Leq"
+		return 1337
+	}
+	return 0
+}
+
+func issue75144for(a, b []uint64) bool {
+	if len(a) == len(b) {
+		for len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = b[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+		}
+		if len(a) == len(b) { // ERROR "Proved Eq64$"
+			return true
+		}
+	}
+	return false
+}
+
+func issue75144if(a, b []uint64) bool {
+	if len(a) == len(b) {
+		if len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = b[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+		}
+		if len(a) == len(b) { // ERROR "Proved Eq64$"
+			return true
+		}
+	}
+	return false
+}
+
+func issue75144if2(a, b, c, d []uint64) (r bool) {
+	if len(a) != len(b) || len(c) != len(d) {
+		return
+	}
+	if len(a) <= 4 || len(c) <= 4 {
+		return
+	}
+	if len(a) < len(c) {
+		c = c[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+		d = d[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+	} else {
+		a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+		b = b[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+	}
+	if len(a) == len(c) {
+		return
+	}
+	if len(a) == len(b) { // ERROR "Proved Eq64$"
+		r = true
+	}
+	if len(c) == len(d) { // ERROR "Proved Eq64$"
+		r = true
+	}
+	return
+}
+
+func issue75144forCannot(a, b []uint64) bool {
+	if len(a) == len(b) {
+		for len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = b[4:]
+			for len(a) > 2 {
+				a = a[2:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+				b = b[2:]
+			}
+		}
+		if len(a) == len(b) {
+			return true
+		}
+	}
+	return false
+}
+
+func issue75144ifCannot(a, b []uint64) bool {
+	if len(a) == len(b) {
+		if len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = b[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			if len(a) > 2 {
+				a = a[2:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+				b = b[2:]
+			}
+		}
+		if len(a) == len(b) {
+			return true
+		}
+	}
+	return false
+}
+
+func issue75144ifCannot2(a, b []uint64) bool {
+	if len(a) == len(b) {
+		if len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = b[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+		} else if len(a) > 2 {
+			a = a[2:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = b[2:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+		}
+		if len(a) == len(b) {
+			return true
+		}
+	}
+	return false
+}
+
+func issue75144forNot(a, b []uint64) bool {
+	if len(a) == len(b) {
+		for len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = b[3:]
+		}
+		if len(a) == len(b) {
+			return true
+		}
+	}
+	return false
+}
+
+func issue75144forNot2(a, b, c []uint64) bool {
+	if len(a) == len(b) {
+		for len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+			b = c[4:]
+		}
+		if len(a) == len(b) {
+			return true
+		}
+	}
+	return false
+}
+
+func issue75144ifNot(a, b []uint64) bool {
+	if len(a) == len(b) {
+		if len(a) > 4 {
+			a = a[4:] // ERROR "Proved slicemask not needed$" "Proved IsSliceInBounds$"
+		} else {
+			b = b[4:]
+		}
+		if len(a) == len(b) {
+			return true
+		}
+	}
+	return false
 }
 
 //go:noinline

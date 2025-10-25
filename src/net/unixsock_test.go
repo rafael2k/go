@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !plan9 && !windows
+//go:build !plan9
 
 package net
 
@@ -247,7 +247,6 @@ func TestUnixConnLocalAndRemoteNames(t *testing.T) {
 
 	handler := func(ls *localServer, ln Listener) {}
 	for _, laddr := range []string{"", testUnixAddr(t)} {
-		laddr := laddr
 		taddr := testUnixAddr(t)
 		ta, err := ResolveUnixAddr("unix", taddr)
 		if err != nil {
@@ -282,7 +281,7 @@ func TestUnixConnLocalAndRemoteNames(t *testing.T) {
 		}
 
 		switch runtime.GOOS {
-		case "android", "linux":
+		case "android", "linux", "windows":
 			if laddr == "" {
 				laddr = "@" // autobind feature
 			}
@@ -306,7 +305,6 @@ func TestUnixgramConnLocalAndRemoteNames(t *testing.T) {
 	}
 
 	for _, laddr := range []string{"", testUnixAddr(t)} {
-		laddr := laddr
 		taddr := testUnixAddr(t)
 		ta, err := ResolveUnixAddr("unixgram", taddr)
 		if err != nil {

@@ -358,6 +358,11 @@ func TestTypesInfo(t *testing.T) {
 		// go.dev/issue/47895
 		{`package p; import "unsafe"; type S struct { f int }; var s S; var _ = unsafe.Offsetof(s.f)`, `s.f`, `int`},
 
+		// go.dev/issue/74303. Note that interface field types are synthetic, so
+		// even though `func()` doesn't appear in the source, it appears in the
+		// syntax tree.
+		{`package p; type T interface { M(int) }`, `func(int)`, `func(int)`},
+
 		// go.dev/issue/50093
 		{`package u0a; func _[_ interface{int}]() {}`, `int`, `int`},
 		{`package u1a; func _[_ interface{~int}]() {}`, `~int`, `~int`},
@@ -2463,8 +2468,8 @@ func TestInstantiateErrors(t *testing.T) {
 			t.Fatalf("Instantiate(%v, %v) returned nil error, want non-nil", T, test.targs)
 		}
 
-		var argErr *ArgumentError
-		if !errors.As(err, &argErr) {
+		argErr, ok := errors.AsType[*ArgumentError](err)
+		if !ok {
 			t.Fatalf("Instantiate(%v, %v): error is not an *ArgumentError", T, test.targs)
 		}
 
@@ -2479,8 +2484,8 @@ func TestArgumentErrorUnwrapping(t *testing.T) {
 		Index: 1,
 		Err:   Error{Msg: "test"},
 	}
-	var e Error
-	if !errors.As(err, &e) {
+	e, ok := errors.AsType[Error](err)
+	if !ok {
 		t.Fatalf("error %v does not wrap types.Error", err)
 	}
 	if e.Msg != "test" {

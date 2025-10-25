@@ -117,10 +117,6 @@ func TestCPUProfileMultithreadMagnitude(t *testing.T) {
 		t.Skip("issue 35057 is only confirmed on Linux")
 	}
 
-	// Linux [5.9,5.16) has a kernel bug that can break CPU timers on newly
-	// created threads, breaking our CPU accounting.
-	major, minor := unix.KernelVersion()
-	t.Logf("Running on Linux %d.%d", major, minor)
 	defer func() {
 		if t.Failed() {
 			t.Logf("Failure of this test may indicate that your system suffers from a known Linux kernel bug fixed on newer kernels. See https://golang.org/issue/49065.")
@@ -131,9 +127,9 @@ func TestCPUProfileMultithreadMagnitude(t *testing.T) {
 	// it enabled to potentially warn users that they are on a broken
 	// kernel.
 	if testenv.Builder() != "" && (runtime.GOARCH == "386" || runtime.GOARCH == "amd64") {
-		have59 := major > 5 || (major == 5 && minor >= 9)
-		have516 := major > 5 || (major == 5 && minor >= 16)
-		if have59 && !have516 {
+		// Linux [5.9,5.16) has a kernel bug that can break CPU timers on newly
+		// created threads, breaking our CPU accounting.
+		if unix.KernelVersionGE(5, 9) && !unix.KernelVersionGE(5, 16) {
 			testenv.SkipFlaky(t, 49065)
 		}
 	}
@@ -348,6 +344,11 @@ func (h inlineWrapper) dump(pcs []uintptr) {
 
 func inlinedWrapperCallerDump(pcs []uintptr) {
 	var h inlineWrapperInterface
+
+	// Take the address of h, such that h.dump() call (below)
+	// does not get devirtualized by the compiler.
+	_ = &h
+
 	h = &inlineWrapper{}
 	h.dump(pcs)
 }
@@ -416,27 +417,6 @@ func parseProfile(t *testing.T, valBytes []byte, f func(uintptr, []*profile.Loca
 	return p
 }
 
-func cpuProfilingBroken() bool {
-	switch runtime.GOOS {
-	case "plan9":
-		// Profiling unimplemented.
-		return true
-	case "aix":
-		// See https://golang.org/issue/45170.
-		return true
-	case "ios", "dragonfly", "netbsd", "illumos", "solaris":
-		// See https://golang.org/issue/13841.
-		return true
-	case "openbsd":
-		if runtime.GOARCH == "arm" || runtime.GOARCH == "arm64" {
-			// See https://golang.org/issue/13841.
-			return true
-		}
-	}
-
-	return false
-}
-
 // testCPUProfile runs f under the CPU profiler, checking for some conditions specified by need,
 // as interpreted by matches, and returns the parsed profile.
 func testCPUProfile(t *testing.T, matches profileMatchFunc, f func(dur time.Duration)) *profile.Profile {
@@ -454,7 +434,7 @@ func testCPUProfile(t *testing.T, matches profileMatchFunc, f func(dur time.Dura
 		t.Skip("skipping on wasip1")
 	}
 
-	broken := cpuProfilingBroken()
+	broken := testenv.CPUProfilingBroken()
 
 	deadline, ok := t.Deadline()
 	if broken || !ok {
@@ -486,7 +466,7 @@ func testCPUProfile(t *testing.T, matches profileMatchFunc, f func(dur time.Dura
 		f(duration)
 		StopCPUProfile()
 
-		if p, ok := profileOk(t, matches, prof, duration); ok {
+		if p, ok := profileOk(t, matches, &prof, duration); ok {
 			return p
 		}
 
@@ -536,7 +516,7 @@ func stackContains(spec string, count uintptr, stk []*profile.Location, labels m
 
 type sampleMatchFunc func(spec string, count uintptr, stk []*profile.Location, labels map[string][]string) bool
 
-func profileOk(t *testing.T, matches profileMatchFunc, prof bytes.Buffer, duration time.Duration) (_ *profile.Profile, ok bool) {
+func profileOk(t *testing.T, matches profileMatchFunc, prof *bytes.Buffer, duration time.Duration) (_ *profile.Profile, ok bool) {
 	ok = true
 
 	var samples uintptr
@@ -654,10 +634,6 @@ func TestCPUProfileWithFork(t *testing.T) {
 	heap := 1 << 30
 	if runtime.GOOS == "android" {
 		// Use smaller size for Android to avoid crash.
-		heap = 100 << 20
-	}
-	if runtime.GOOS == "windows" && runtime.GOARCH == "arm" {
-		// Use smaller heap for Windows/ARM to avoid crash.
 		heap = 100 << 20
 	}
 	if testing.Short() {
@@ -1598,8 +1574,8 @@ func TestGoroutineProfileConcurrency(t *testing.T) {
 		return strings.Count(s, "\truntime/pprof.runtime_goroutineProfileWithLabels+")
 	}
 
-	includesFinalizer := func(s string) bool {
-		return strings.Contains(s, "runtime.runfinq")
+	includesFinalizerOrCleanup := func(s string) bool {
+		return strings.Contains(s, "runtime.runFinalizers") || strings.Contains(s, "runtime.runCleanups")
 	}
 
 	// Concurrent calls to the goroutine profiler should not trigger data races
@@ -1637,8 +1613,8 @@ func TestGoroutineProfileConcurrency(t *testing.T) {
 		var w strings.Builder
 		goroutineProf.WriteTo(&w, 1)
 		prof := w.String()
-		if includesFinalizer(prof) {
-			t.Errorf("profile includes finalizer (but finalizer should be marked as system):\n%s", prof)
+		if includesFinalizerOrCleanup(prof) {
+			t.Errorf("profile includes finalizer or cleanup (but should be marked as system):\n%s", prof)
 		}
 	})
 
@@ -1669,7 +1645,7 @@ func TestGoroutineProfileConcurrency(t *testing.T) {
 		var w strings.Builder
 		goroutineProf.WriteTo(&w, 1)
 		prof := w.String()
-		if !includesFinalizer(prof) {
+		if !includesFinalizerOrCleanup(prof) {
 			t.Errorf("profile does not include finalizer (and it should be marked as user):\n%s", prof)
 		}
 	})
@@ -1827,6 +1803,45 @@ func TestGoroutineProfileCoro(t *testing.T) {
 	// Take a goroutine profile. If the bug in #69998 is present, this will crash
 	// with high probability. We don't care about the output for this bug.
 	goroutineProf.WriteTo(io.Discard, 1)
+}
+
+// This test tries to provoke a situation wherein the finalizer goroutine is
+// erroneously inspected by the goroutine profiler in such a way that could
+// cause a crash. See go.dev/issue/74090.
+func TestGoroutineProfileIssue74090(t *testing.T) {
+	testenv.MustHaveParallelism(t)
+
+	goroutineProf := Lookup("goroutine")
+
+	// T is a pointer type so it won't be allocated by the tiny
+	// allocator, which can lead to its finalizer not being called
+	// during this test.
+	type T *byte
+	for range 10 {
+		// We use finalizers for this test because finalizers transition between
+		// system and user goroutine on each call, since there's substantially
+		// more work to do to set up a finalizer call. Cleanups, on the other hand,
+		// transition once for a whole batch, and so are less likely to trigger
+		// the failure. Under stress testing conditions this test fails approximately
+		// 5 times every 1000 executions on a 64 core machine without the appropriate
+		// fix, which is not ideal but if this test crashes at all, it's a clear
+		// signal that something is broken.
+		var objs []*T
+		for range 10000 {
+			obj := new(T)
+			runtime.SetFinalizer(obj, func(_ interface{}) {})
+			objs = append(objs, obj)
+		}
+		objs = nil
+
+		// Queue up all the finalizers.
+		runtime.GC()
+
+		// Try to run a goroutine profile concurrently with finalizer execution
+		// to trigger the bug.
+		var w strings.Builder
+		goroutineProf.WriteTo(&w, 1)
+	}
 }
 
 func BenchmarkGoroutine(b *testing.B) {
@@ -2086,7 +2101,7 @@ func TestLabelSystemstack(t *testing.T) {
 					// which part of the function they are
 					// at.
 					mayBeLabeled = true
-				case "runtime.bgsweep", "runtime.bgscavenge", "runtime.forcegchelper", "runtime.gcBgMarkWorker", "runtime.runfinq", "runtime.sysmon":
+				case "runtime.bgsweep", "runtime.bgscavenge", "runtime.forcegchelper", "runtime.gcBgMarkWorker", "runtime.runFinalizers", "runtime.runCleanups", "runtime.sysmon":
 					// Runtime system goroutines or threads
 					// (such as those identified by
 					// runtime.isSystemGoroutine). These
@@ -2568,9 +2583,10 @@ func TestProfilerStackDepth(t *testing.T) {
 				t.Logf("matched stack=%s", stk)
 				if len(stk) != depth {
 					t.Errorf("want stack depth = %d, got %d", depth, len(stk))
+					continue
 				}
 
-				if rootFn, wantFn := stk[depth-1], "runtime/pprof.produceProfileEvents"; rootFn != wantFn {
+				if rootFn, wantFn := stk[depth-1], "runtime/pprof.allocDeep"; rootFn != wantFn {
 					t.Errorf("want stack stack root %s, got %v", wantFn, rootFn)
 				}
 			}
@@ -2579,15 +2595,7 @@ func TestProfilerStackDepth(t *testing.T) {
 }
 
 func hasPrefix(stk []string, prefix []string) bool {
-	if len(prefix) > len(stk) {
-		return false
-	}
-	for i := range prefix {
-		if stk[i] != prefix[i] {
-			return false
-		}
-	}
-	return true
+	return len(prefix) <= len(stk) && slices.Equal(stk[:len(prefix)], prefix)
 }
 
 // ensure that stack records are valid map keys (comparable)
@@ -2661,7 +2669,7 @@ func produceProfileEvents(t *testing.T, depth int) {
 	goroutineDeep(t, depth-4) // -4 for produceProfileEvents, **, chanrecv1, chanrev, gopark
 }
 
-func getProfileStacks(collect func([]runtime.BlockProfileRecord) (int, bool), fileLine bool) []string {
+func getProfileStacks(collect func([]runtime.BlockProfileRecord) (int, bool), fileLine bool, pcs bool) []string {
 	var n int
 	var ok bool
 	var p []runtime.BlockProfileRecord
@@ -2679,6 +2687,9 @@ func getProfileStacks(collect func([]runtime.BlockProfileRecord) (int, bool), fi
 		for i, pc := range r.Stack() {
 			if i > 0 {
 				stack.WriteByte('\n')
+			}
+			if pcs {
+				fmt.Fprintf(&stack, "%x ", pc)
 			}
 			// Use FuncForPC instead of CallersFrames,
 			// because we want to see the info for exactly
@@ -2720,9 +2731,9 @@ func TestMutexBlockFullAggregation(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(workers)
-	for j := 0; j < workers; j++ {
+	for range workers {
 		go func() {
-			for i := 0; i < iters; i++ {
+			for range iters {
 				m.Lock()
 				// Wait at least 1 millisecond to pass the
 				// starvation threshold for the mutex
@@ -2735,7 +2746,7 @@ func TestMutexBlockFullAggregation(t *testing.T) {
 	wg.Wait()
 
 	assertNoDuplicates := func(name string, collect func([]runtime.BlockProfileRecord) (int, bool)) {
-		stacks := getProfileStacks(collect, true)
+		stacks := getProfileStacks(collect, true, true)
 		seen := make(map[string]struct{})
 		for _, s := range stacks {
 			if _, ok := seen[s]; ok {
@@ -2811,7 +2822,7 @@ runtime/pprof.inlineA`,
 
 	for _, tc := range tcs {
 		t.Run(tc.Name, func(t *testing.T) {
-			stacks := getProfileStacks(tc.Collect, false)
+			stacks := getProfileStacks(tc.Collect, false, false)
 			for _, s := range stacks {
 				if strings.Contains(s, tc.SubStack) {
 					return

@@ -392,14 +392,34 @@ func decodeInnerClientHello(outer *clientHelloMsg, encoded []byte) (*clientHello
 		return nil, errInvalidECHExt
 	}
 
-	if len(inner.supportedVersions) != 1 || (len(inner.supportedVersions) >= 1 && inner.supportedVersions[0] != VersionTLS13) {
-		return nil, errors.New("tls: client sent encrypted_client_hello extension and offered incompatible versions")
+	hasTLS13 := false
+	for _, v := range inner.supportedVersions {
+		// Skip GREASE values (values of the form 0x?A0A).
+		// GREASE (Generate Random Extensions And Sustain Extensibility) is a mechanism used by
+		// browsers like Chrome to ensure TLS implementations correctly ignore unknown values.
+		// GREASE values follow a specific pattern: 0x?A0A, where ? can be any hex digit.
+		// These values should be ignored when processing supported TLS versions.
+		if v&0x0F0F == 0x0A0A && v&0xff == v>>8 {
+			continue
+		}
+
+		// Ensure at least TLS 1.3 is offered.
+		if v == VersionTLS13 {
+			hasTLS13 = true
+		} else if v < VersionTLS13 {
+			// Reject if any non-GREASE value is below TLS 1.3, as ECH requires TLS 1.3+.
+			return nil, errors.New("tls: client sent encrypted_client_hello extension with unsupported versions")
+		}
+	}
+
+	if !hasTLS13 {
+		return nil, errors.New("tls: client sent encrypted_client_hello extension but did not offer TLS 1.3")
 	}
 
 	return inner, nil
 }
 
-func decryptECHPayload(context *hpke.Receipient, hello, payload []byte) ([]byte, error) {
+func decryptECHPayload(context *hpke.Recipient, hello, payload []byte) ([]byte, error) {
 	outerAAD := bytes.Replace(hello[4:], payload, make([]byte, len(payload)), 1)
 	return context.Open(outerAAD, payload)
 }
@@ -548,17 +568,7 @@ func parseECHExt(ext []byte) (echType echExtType, cs echCipher, configID uint8, 
 	return echType, cs, configID, bytes.Clone(encap), bytes.Clone(payload), nil
 }
 
-func marshalEncryptedClientHelloConfigList(configs []EncryptedClientHelloKey) ([]byte, error) {
-	builder := cryptobyte.NewBuilder(nil)
-	builder.AddUint16LengthPrefixed(func(builder *cryptobyte.Builder) {
-		for _, c := range configs {
-			builder.AddBytes(c.Config)
-		}
-	})
-	return builder.Bytes()
-}
-
-func (c *Conn) processECHClientHello(outer *clientHelloMsg) (*clientHelloMsg, *echServerContext, error) {
+func (c *Conn) processECHClientHello(outer *clientHelloMsg, echKeys []EncryptedClientHelloKey) (*clientHelloMsg, *echServerContext, error) {
 	echType, echCiphersuite, configID, encap, payload, err := parseECHExt(outer.encryptedClientHello)
 	if err != nil {
 		if errors.Is(err, errInvalidECHExt) {
@@ -574,11 +584,11 @@ func (c *Conn) processECHClientHello(outer *clientHelloMsg) (*clientHelloMsg, *e
 		return outer, &echServerContext{inner: true}, nil
 	}
 
-	if len(c.config.EncryptedClientHelloKeys) == 0 {
+	if len(echKeys) == 0 {
 		return outer, nil, nil
 	}
 
-	for _, echKey := range c.config.EncryptedClientHelloKeys {
+	for _, echKey := range echKeys {
 		skip, config, err := parseECHConfig(echKey.Config)
 		if err != nil || skip {
 			c.sendAlert(alertInternalError)
@@ -593,7 +603,7 @@ func (c *Conn) processECHClientHello(outer *clientHelloMsg) (*clientHelloMsg, *e
 			return nil, nil, fmt.Errorf("tls: invalid EncryptedClientHelloKeys PrivateKey: %s", err)
 		}
 		info := append([]byte("tls ech\x00"), echKey.Config...)
-		hpkeContext, err := hpke.SetupReceipient(hpke.DHKEM_X25519_HKDF_SHA256, echCiphersuite.KDFID, echCiphersuite.AEADID, echPriv, info, encap)
+		hpkeContext, err := hpke.SetupRecipient(hpke.DHKEM_X25519_HKDF_SHA256, echCiphersuite.KDFID, echCiphersuite.AEADID, echPriv, info, encap)
 		if err != nil {
 			// attempt next trial decryption
 			continue

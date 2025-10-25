@@ -18,6 +18,9 @@ import (
 //go:linkname procMkdirat libc_mkdirat
 //go:linkname procFchmodat libc_fchmodat
 //go:linkname procFchownat libc_fchownat
+//go:linkname procRenameat libc_renameat
+//go:linkname procLinkat libc_linkat
+//go:linkname procSymlinkat libc_symlinkat
 
 var (
 	procFstatat,
@@ -26,7 +29,10 @@ var (
 	procReadlinkat,
 	procMkdirat,
 	procFchmodat,
-	procFchownat uintptr
+	procFchownat,
+	procRenameat,
+	procLinkat,
+	procSymlinkat uintptr
 )
 
 func Unlinkat(dirfd int, path string, flags int) error {
@@ -35,7 +41,11 @@ func Unlinkat(dirfd int, path string, flags int) error {
 		return err
 	}
 
-	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procUnlinkat)), 3, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(flags), 0, 0, 0)
+	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procUnlinkat)), 3,
+		uintptr(dirfd),
+		uintptr(unsafe.Pointer(p)),
+		uintptr(flags),
+		0, 0, 0)
 	if errno != 0 {
 		return errno
 	}
@@ -49,7 +59,12 @@ func Openat(dirfd int, path string, flags int, perm uint32) (int, error) {
 		return 0, err
 	}
 
-	fd, _, errno := syscall6(uintptr(unsafe.Pointer(&procOpenat)), 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(flags), uintptr(perm), 0, 0)
+	fd, _, errno := syscall6(uintptr(unsafe.Pointer(&procOpenat)), 4,
+		uintptr(dirfd),
+		uintptr(unsafe.Pointer(p)),
+		uintptr(flags),
+		uintptr(perm),
+		0, 0)
 	if errno != 0 {
 		return 0, errno
 	}
@@ -63,7 +78,12 @@ func Fstatat(dirfd int, path string, stat *syscall.Stat_t, flags int) error {
 		return err
 	}
 
-	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procFstatat)), 4, uintptr(dirfd), uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(stat)), uintptr(flags), 0, 0)
+	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procFstatat)), 4,
+		uintptr(dirfd),
+		uintptr(unsafe.Pointer(p)),
+		uintptr(unsafe.Pointer(stat)),
+		uintptr(flags),
+		0, 0)
 	if errno != 0 {
 		return errno
 	}
@@ -134,13 +154,77 @@ func Fchownat(dirfd int, path string, uid, gid int, flags int) error {
 	if err != nil {
 		return err
 	}
-	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procFchownat)), 4,
+	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procFchownat)), 5,
 		uintptr(dirfd),
 		uintptr(unsafe.Pointer(p)),
 		uintptr(uid),
 		uintptr(gid),
 		uintptr(flags),
 		0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func Renameat(olddirfd int, oldpath string, newdirfd int, newpath string) error {
+	oldp, err := syscall.BytePtrFromString(oldpath)
+	if err != nil {
+		return err
+	}
+	newp, err := syscall.BytePtrFromString(newpath)
+	if err != nil {
+		return err
+	}
+	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procRenameat)), 4,
+		uintptr(olddirfd),
+		uintptr(unsafe.Pointer(oldp)),
+		uintptr(newdirfd),
+		uintptr(unsafe.Pointer(newp)),
+		0,
+		0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func Linkat(olddirfd int, oldpath string, newdirfd int, newpath string, flag int) error {
+	oldp, err := syscall.BytePtrFromString(oldpath)
+	if err != nil {
+		return err
+	}
+	newp, err := syscall.BytePtrFromString(newpath)
+	if err != nil {
+		return err
+	}
+	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procLinkat)), 5,
+		uintptr(olddirfd),
+		uintptr(unsafe.Pointer(oldp)),
+		uintptr(newdirfd),
+		uintptr(unsafe.Pointer(newp)),
+		uintptr(flag),
+		0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func Symlinkat(oldpath string, newdirfd int, newpath string) error {
+	oldp, err := syscall.BytePtrFromString(oldpath)
+	if err != nil {
+		return err
+	}
+	newp, err := syscall.BytePtrFromString(newpath)
+	if err != nil {
+		return err
+	}
+	_, _, errno := syscall6(uintptr(unsafe.Pointer(&procSymlinkat)), 3,
+		uintptr(unsafe.Pointer(oldp)),
+		uintptr(newdirfd),
+		uintptr(unsafe.Pointer(newp)),
+		0, 0, 0)
 	if errno != 0 {
 		return errno
 	}

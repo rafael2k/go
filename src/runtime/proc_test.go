@@ -696,7 +696,6 @@ func BenchmarkCreateGoroutinesCapture(b *testing.B) {
 		var wg sync.WaitGroup
 		wg.Add(N)
 		for i := 0; i < N; i++ {
-			i := i
 			go func() {
 				if i >= N {
 					b.Logf("bad") // just to capture b
@@ -1023,6 +1022,17 @@ func TestLockOSThreadTemplateThreadRace(t *testing.T) {
 		if output != want {
 			t.Fatalf("run %d: want %q, got %q", i, want, output)
 		}
+	}
+}
+
+func TestLockOSThreadVgetrandom(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skipf("vgetrandom only relevant on Linux")
+	}
+	output := runTestProg(t, "testprog", "LockOSThreadVgetrandom")
+	want := "OK\n"
+	if output != want {
+		t.Errorf("want %q, got %q", want, output)
 	}
 }
 

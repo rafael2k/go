@@ -4,6 +4,10 @@
 
 // Package ast declares the types used to represent syntax trees for Go
 // packages.
+//
+// Syntax trees may be constructed directly, but they are typically
+// produced from Go source code by the parser; see the ParseFile
+// function in package [go/parser].
 package ast
 
 import (
@@ -130,10 +134,10 @@ func (g *CommentGroup) Text() string {
 		}
 
 		// Split on newlines.
-		cl := strings.Split(c, "\n")
+		cl := strings.SplitSeq(c, "\n")
 
 		// Walk lines, stripping trailing white space and adding to list.
-		for _, l := range cl {
+		for l := range cl {
 			lines = append(lines, stripTrailingWhitespace(l))
 		}
 	}
@@ -1060,7 +1064,7 @@ type File struct {
 	Scope              *Scope          // package scope (this file only). Deprecated: see Object
 	Imports            []*ImportSpec   // imports in this file
 	Unresolved         []*Ident        // unresolved identifiers in this file. Deprecated: see Object
-	Comments           []*CommentGroup // list of all comments in the source file
+	Comments           []*CommentGroup // comments in the file, in lexical order
 	GoVersion          string          // minimum Go version required by //go:build or // +build directives
 }
 
@@ -1119,7 +1123,7 @@ func generator(file *File) (string, bool) {
 			// opt: check Contains first to avoid unnecessary array allocation in Split.
 			const prefix = "// Code generated "
 			if strings.Contains(comment.Text, prefix) {
-				for _, line := range strings.Split(comment.Text, "\n") {
+				for line := range strings.SplitSeq(comment.Text, "\n") {
 					if rest, ok := strings.CutPrefix(line, prefix); ok {
 						if gen, ok := strings.CutSuffix(rest, " DO NOT EDIT."); ok {
 							return gen, true

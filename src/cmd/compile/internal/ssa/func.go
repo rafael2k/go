@@ -102,6 +102,7 @@ func (c *Config) NewFunc(fe Frontend, cache *Cache) *Func {
 		NamedValues:          make(map[LocalSlot][]*Value),
 		CanonicalLocalSlots:  make(map[LocalSlot]*LocalSlot),
 		CanonicalLocalSplits: make(map[LocalSlotSplitKey]*LocalSlot),
+		OwnAux:               &AuxCall{},
 	}
 }
 
@@ -342,7 +343,7 @@ func (f *Func) LogStat(key string, args ...interface{}) {
 	}
 	n := "missing_pass"
 	if f.pass != nil {
-		n = strings.Replace(f.pass.name, " ", "_", -1)
+		n = strings.ReplaceAll(f.pass.name, " ", "_")
 	}
 	f.Warnl(f.Entry.Pos, "\t%s\t%s%s\t%s", n, key, value, f.Name)
 }
@@ -832,9 +833,6 @@ func (f *Func) spSb() (sp, sb *Value) {
 // useFMA allows targeted debugging w/ GOFMAHASH
 // If you have an architecture-dependent FP glitch, this will help you find it.
 func (f *Func) useFMA(v *Value) bool {
-	if !f.Config.UseFMA {
-		return false
-	}
 	if base.FmaHash == nil {
 		return true
 	}

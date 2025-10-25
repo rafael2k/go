@@ -1888,4 +1888,18 @@ next:
 	DC	CIGDVAC, R25                       // b97e0bd5
 	DC	CVAP, R26                          // 3a7c0bd5
 	DC	CVADP, R27                         // 3b7d0bd5
+
+// Branch Target Identification
+	BTI	C                                  // 5f2403d5
+	BTI	J                                  // 9f2403d5
+	BTI	JC                                 // df2403d5
+
+// Pointer Authentication Codes (PAC)
+	PACIASP                                    // 3f2303d5
+	AUTIASP                                    // bf2303d5
+	PACIBSP                                    // 7f2303d5
+	AUTIBSP                                    // ff2303d5
+	AUTIA1716                                  // 9f2103d5
+	AUTIB1716                                  // df2103d5
+
 	END

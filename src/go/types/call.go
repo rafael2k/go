@@ -58,7 +58,7 @@ func (check *Checker) funcInst(T *target, pos token.Pos, x *operand, ix *indexed
 
 	// Check the number of type arguments (got) vs number of type parameters (want).
 	// Note that x is a function value, not a type expression, so we don't need to
-	// call under below.
+	// call Underlying below.
 	sig := x.typ.(*Signature)
 	got, want := len(targs), sig.TypeParams().Len()
 	if got > want {
@@ -211,7 +211,7 @@ func (check *Checker) callExpr(x *operand, call *ast.CallExpr) exprKind {
 					check.errorf(call.Args[0], BadDotDotDotSyntax, "invalid use of ... in conversion to %s", T)
 					break
 				}
-				if t, _ := under(T).(*Interface); t != nil && !isTypeParam(T) {
+				if t, _ := T.Underlying().(*Interface); t != nil && !isTypeParam(T) {
 					if !t.IsMethodSet() {
 						check.errorf(call, MisplacedConstraintIface, "cannot use interface %s in conversion (contains specific type constraints or is comparable)", T)
 						break
@@ -722,7 +722,14 @@ func (check *Checker) selector(x *operand, e *ast.SelectorExpr, def *TypeName, w
 				exp = pkg.scope.Lookup(sel)
 				if exp == nil {
 					if !pkg.fake && isValidName(sel) {
-						check.errorf(e.Sel, UndeclaredImportedName, "undefined: %s", ast.Expr(e))
+						// Try to give a better error message when selector matches an object name ignoring case.
+						exps := pkg.scope.lookupIgnoringCase(sel, true)
+						if len(exps) >= 1 {
+							// report just the first one
+							check.errorf(e.Sel, UndeclaredImportedName, "undefined: %s (but have %s)", ast.Expr(e), exps[0].Name())
+						} else {
+							check.errorf(e.Sel, UndeclaredImportedName, "undefined: %s", ast.Expr(e))
+						}
 					}
 					goto Error
 				}
@@ -808,7 +815,7 @@ func (check *Checker) selector(x *operand, e *ast.SelectorExpr, def *TypeName, w
 	obj, index, indirect = lookupFieldOrMethod(x.typ, x.mode == variable, check.pkg, sel, false)
 	if obj == nil {
 		// Don't report another error if the underlying type was invalid (go.dev/issue/49541).
-		if !isValid(under(x.typ)) {
+		if !isValid(x.typ.Underlying()) {
 			goto Error
 		}
 

@@ -115,6 +115,25 @@ func (e *LinkError) Unwrap() error {
 	return e.Err
 }
 
+// NewFile returns a new [File] with the given file descriptor and name.
+// The returned value will be nil if fd is not a valid file descriptor.
+//
+// NewFile's behavior differs on some platforms:
+//
+//   - On Unix, if fd is in non-blocking mode, NewFile will attempt to return a pollable file.
+//   - On Windows, if fd is opened for asynchronous I/O (that is, [syscall.FILE_FLAG_OVERLAPPED]
+//     has been specified in the [syscall.CreateFile] call), NewFile will attempt to return a pollable
+//     file by associating fd with the Go runtime I/O completion port.
+//     The I/O operations will be performed synchronously if the association fails.
+//
+// Only pollable files support [File.SetDeadline], [File.SetReadDeadline], and [File.SetWriteDeadline].
+//
+// After passing it to NewFile, fd may become invalid under the same conditions described
+// in the comments of [File.Fd], and the same constraints apply.
+func NewFile(fd uintptr, name string) *File {
+	return newFileFromNewFile(fd, name)
+}
+
 // Read reads up to len(b) bytes from the File and stores them in b.
 // It returns the number of bytes read and any error encountered.
 // At end of file, Read returns 0, io.EOF.
@@ -597,7 +616,7 @@ func UserHomeDir() (string, error) {
 	if v := Getenv(env); v != "" {
 		return v, nil
 	}
-	// On some geese the home directory is not always defined.
+	// On some operating systems the home directory is not always defined.
 	switch runtime.GOOS {
 	case "android":
 		return "/sdcard", nil
@@ -688,15 +707,19 @@ func (f *File) SyscallConn() (syscall.RawConn, error) {
 
 // Fd returns the system file descriptor or handle referencing the open file.
 // If f is closed, the descriptor becomes invalid.
-// If f is garbage collected, a cleanup may close the descriptor,
-// making it invalid; see [runtime.AddCleanup] for more information on when
-// a cleanup might be run.
+// If f is garbage collected, a finalizer may close the descriptor,
+// making it invalid; see [runtime.SetFinalizer] for more information on when
+// a finalizer might be run.
 //
 // Do not close the returned descriptor; that could cause a later
 // close of f to close an unrelated descriptor.
 //
-// On Unix systems this will cause the [File.SetDeadline]
-// methods to stop working.
+// Fd's behavior differs on some platforms:
+//
+//   - On Unix and Windows, [File.SetDeadline] methods will stop working.
+//   - On Windows, the file descriptor will be disassociated from the
+//     Go runtime I/O completion port if there are no concurrent I/O
+//     operations on the file.
 //
 // For most uses prefer the f.SyscallConn method.
 func (f *File) Fd() uintptr {

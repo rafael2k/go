@@ -33,7 +33,7 @@
 //
 // To make it possible for gcc-compiled C code to call a Go function p.GoF,
 // cgo writes a gcc-compiled function named GoF (not p.GoF, since gcc doesn't
-// know about packages).  The gcc-compiled C function f calls GoF.
+// know about packages). The gcc-compiled C function f calls GoF.
 //
 // GoF initializes "frame", a structure containing all of its
 // arguments and slots for p.GoF's results. It calls
@@ -58,10 +58,10 @@
 // m.g0 stack, so that it can be restored later.
 //
 // runtime.cgocallbackg (below) is now running on a real goroutine
-// stack (not an m.g0 stack).  First it calls runtime.exitsyscall, which will
+// stack (not an m.g0 stack). First it calls runtime.exitsyscall, which will
 // block until the $GOMAXPROCS limit allows running this goroutine.
 // Once exitsyscall has returned, it is safe to do things like call the memory
-// allocator or invoke the Go callback function.  runtime.cgocallbackg
+// allocator or invoke the Go callback function. runtime.cgocallbackg
 // first defers a function to unwind m.g0.sched.sp, so that if p.GoF
 // panics, m.g0.sched.sp will be restored to its old value: the m.g0 stack
 // and the m.curg stack will be unwound in lock step.
@@ -191,8 +191,8 @@ func cgocall(fn, arg unsafe.Pointer) int32 {
 
 	osPreemptExtExit(mp)
 
-	// Save current syscall parameters, so m.winsyscall can be
-	// used again if callback decide to make syscall.
+	// After exitsyscall we can be rescheduled on a different M,
+	// so we need to restore the original M's winsyscall.
 	winsyscall := mp.winsyscall
 
 	exitsyscall()
@@ -355,7 +355,9 @@ func cgocallbackg(fn, frame unsafe.Pointer, ctxt uintptr) {
 	gp.m.incgo = true
 	unlockOSThread()
 
-	if gp.m.isextra {
+	if gp.m.isextra && gp.m.ncgo == 0 {
+		// There are no active cgocalls above this frame (ncgo == 0),
+		// thus there can't be more Go frames above this frame.
 		gp.m.isExtraInC = true
 	}
 
@@ -391,7 +393,7 @@ func cgocallbackg1(fn, frame unsafe.Pointer, ctxt uintptr) {
 		// Now we need to set gp.cgoCtxt = s, but we could get
 		// a SIGPROF signal while manipulating the slice, and
 		// the SIGPROF handler could pick up gp.cgoCtxt while
-		// tracing up the stack.  We need to ensure that the
+		// tracing up the stack. We need to ensure that the
 		// handler always sees a valid slice, so set the
 		// values in an order such that it always does.
 		p := (*slice)(unsafe.Pointer(&gp.cgoCtxt))
@@ -541,18 +543,18 @@ func cgoCheckPointer(ptr any, arg any) {
 	t := ep._type
 
 	top := true
-	if arg != nil && (t.Kind_&abi.KindMask == abi.Pointer || t.Kind_&abi.KindMask == abi.UnsafePointer) {
+	if arg != nil && (t.Kind() == abi.Pointer || t.Kind() == abi.UnsafePointer) {
 		p := ep.data
-		if t.Kind_&abi.KindDirectIface == 0 {
+		if !t.IsDirectIface() {
 			p = *(*unsafe.Pointer)(p)
 		}
 		if p == nil || !cgoIsGoPointer(p) {
 			return
 		}
 		aep := efaceOf(&arg)
-		switch aep._type.Kind_ & abi.KindMask {
+		switch aep._type.Kind() {
 		case abi.Bool:
-			if t.Kind_&abi.KindMask == abi.UnsafePointer {
+			if t.Kind() == abi.UnsafePointer {
 				// We don't know the type of the element.
 				break
 			}
@@ -576,7 +578,7 @@ func cgoCheckPointer(ptr any, arg any) {
 			// Check the array rather than the pointer.
 			pt := (*abi.PtrType)(unsafe.Pointer(aep._type))
 			t = pt.Elem
-			if t.Kind_&abi.KindMask != abi.Array {
+			if t.Kind() != abi.Array {
 				throw("can't happen")
 			}
 			ep = aep
@@ -586,15 +588,15 @@ func cgoCheckPointer(ptr any, arg any) {
 		}
 	}
 
-	cgoCheckArg(t, ep.data, t.Kind_&abi.KindDirectIface == 0, top, cgoCheckPointerFail)
+	cgoCheckArg(t, ep.data, !t.IsDirectIface(), top, cgoCheckPointerFail)
 }
 
 const cgoCheckPointerFail = "cgo argument has Go pointer to unpinned Go pointer"
 const cgoResultFail = "cgo result is unpinned Go pointer or points to unpinned Go pointer"
 
-// cgoCheckArg is the real work of cgoCheckPointer. The argument p
-// is either a pointer to the value (of type t), or the value itself,
-// depending on indir. The top parameter is whether we are at the top
+// cgoCheckArg is the real work of cgoCheckPointer and cgoCheckResult.
+// The argument p is either a pointer to the value (of type t), or the value
+// itself, depending on indir. The top parameter is whether we are at the top
 // level, where Go pointers are allowed. Go pointers to pinned objects are
 // allowed as long as they don't reference other unpinned pointers.
 func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
@@ -603,7 +605,7 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 		return
 	}
 
-	switch t.Kind_ & abi.KindMask {
+	switch t.Kind() {
 	default:
 		throw("can't happen")
 	case abi.Array:
@@ -612,7 +614,7 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 			if at.Len != 1 {
 				throw("can't happen")
 			}
-			cgoCheckArg(at.Elem, p, at.Elem.Kind_&abi.KindDirectIface == 0, top, msg)
+			cgoCheckArg(at.Elem, p, !at.Elem.IsDirectIface(), top, msg)
 			return
 		}
 		for i := uintptr(0); i < at.Len; i++ {
@@ -650,7 +652,7 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 		if !top && !isPinned(p) {
 			panic(errorString(msg))
 		}
-		cgoCheckArg(it, p, it.Kind_&abi.KindDirectIface == 0, false, msg)
+		cgoCheckArg(it, p, !it.IsDirectIface(), false, msg)
 	case abi.Slice:
 		st := (*slicetype)(unsafe.Pointer(t))
 		s := (*slice)(p)
@@ -682,7 +684,7 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 			if len(st.Fields) != 1 {
 				throw("can't happen")
 			}
-			cgoCheckArg(st.Fields[0].Typ, p, st.Fields[0].Typ.Kind_&abi.KindDirectIface == 0, top, msg)
+			cgoCheckArg(st.Fields[0].Typ, p, !st.Fields[0].Typ.IsDirectIface(), top, msg)
 			return
 		}
 		for _, f := range st.Fields {
@@ -790,5 +792,5 @@ func cgoCheckResult(val any) {
 
 	ep := efaceOf(&val)
 	t := ep._type
-	cgoCheckArg(t, ep.data, t.Kind_&abi.KindDirectIface == 0, false, cgoResultFail)
+	cgoCheckArg(t, ep.data, !t.IsDirectIface(), false, cgoResultFail)
 }

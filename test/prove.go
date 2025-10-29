@@ -1078,6 +1078,23 @@ func divu(x, y uint) int {
 	return 0
 }
 
+func divuRoundUp(x, y, z uint) int {
+	x &= ^uint(0) >> 8 // can't overflow in add
+	y = min(y, 0xff-1)
+	z = max(z, 0xff)
+	r := (x + y) / z // ERROR "Proved Neq64$"
+	if r <= x {      // ERROR "Proved Leq64U$"
+		return 1
+	}
+	return 0
+}
+
+func divuRoundUpSlice(x []string) {
+	halfRoundedUp := uint(len(x)+1) / 2
+	_ = x[:halfRoundedUp] // ERROR "Proved IsSliceInBounds$"
+	_ = x[halfRoundedUp:] // ERROR "Proved IsSliceInBounds$"
+}
+
 func modu1(x, y uint) int {
 	z := x % y
 	if z < y { // ERROR "Proved Less64U$"
@@ -2482,6 +2499,19 @@ func issue75144ifNot(a, b []uint64) bool {
 		}
 	}
 	return false
+}
+
+func mulIntoAnd(a, b uint) uint {
+	if a > 1 || b > 1 {
+		return 0
+	}
+	return a * b // ERROR "Rewrote Mul v[0-9]+ into And$"
+}
+func mulIntoCondSelect(a, b uint) uint {
+	if a > 1 {
+		return 0
+	}
+	return a * b // ERROR "Rewrote Mul v[0-9]+ into CondSelect"
 }
 
 //go:noinline

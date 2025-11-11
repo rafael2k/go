@@ -123,16 +123,17 @@ func genericFtoa(dst []byte, val float64, fmt byte, prec, bitSize int) []byte {
 		return bigFtoa(dst, prec, fmt, neg, mant, exp, flt)
 	}
 
-	var digs decimalSlice
-	ok := false
 	// Negative precision means "only as much as needed to be exact."
 	shortest := prec < 0
+	var digs decimalSlice
+	if mant == 0 {
+		return formatDigits(dst, shortest, neg, digs, prec, fmt)
+	}
 	if shortest {
 		// Use Ryu algorithm.
 		var buf [32]byte
 		digs.d = buf[:]
 		ryuFtoaShortest(&digs, mant, exp-int(flt.mantbits), flt)
-		ok = true
 		// Precision for shortest representation mode.
 		switch fmt {
 		case 'e', 'E':
@@ -142,36 +143,44 @@ func genericFtoa(dst []byte, val float64, fmt byte, prec, bitSize int) []byte {
 		case 'g', 'G':
 			prec = digs.nd
 		}
-	} else if fmt != 'f' {
-		// Fixed number of digits.
-		digits := prec
-		switch fmt {
-		case 'e', 'E':
-			digits++
-		case 'g', 'G':
-			if prec == 0 {
-				prec = 1
-			}
-			digits = prec
-		default:
-			// Invalid mode.
-			digits = 1
-		}
-		var buf [24]byte
-		if bitSize == 32 && digits <= 9 {
-			digs.d = buf[:]
-			ryuFtoaFixed32(&digs, uint32(mant), exp-int(flt.mantbits), digits)
-			ok = true
-		} else if digits <= 18 {
-			digs.d = buf[:]
-			ryuFtoaFixed64(&digs, mant, exp-int(flt.mantbits), digits)
-			ok = true
-		}
+		return formatDigits(dst, shortest, neg, digs, prec, fmt)
 	}
-	if !ok {
-		return bigFtoa(dst, prec, fmt, neg, mant, exp, flt)
+
+	// Fixed number of digits.
+	digits := prec
+	switch fmt {
+	case 'f':
+		// %f precision specifies digits after the decimal point.
+		// Estimate an upper bound on the total number of digits needed.
+		// ftoaFixed will shorten as needed according to prec.
+		if exp >= 0 {
+			digits = 1 + mulLog10_2(1+exp) + prec
+		} else {
+			digits = 1 + prec - mulLog10_2(-exp)
+		}
+	case 'e', 'E':
+		digits++
+	case 'g', 'G':
+		if prec == 0 {
+			prec = 1
+		}
+		digits = prec
+	default:
+		// Invalid mode.
+		digits = 1
 	}
-	return formatDigits(dst, shortest, neg, digs, prec, fmt)
+	if digits <= 18 {
+		// digits <= 0 happens for %f on very small numbers
+		// and means that we're guaranteed to print all zeros.
+		if digits > 0 {
+			var buf [24]byte
+			digs.d = buf[:]
+			fixedFtoa(&digs, mant, exp-int(flt.mantbits), digits, prec, fmt)
+		}
+		return formatDigits(dst, false, neg, digs, prec, fmt)
+	}
+
+	return bigFtoa(dst, prec, fmt, neg, mant, exp, flt)
 }
 
 // bigFtoa uses multiprecision computations to format a float.

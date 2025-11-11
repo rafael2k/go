@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/bits"
 	"slices"
+	"strings"
 )
 
 type branch int
@@ -132,7 +133,7 @@ type limit struct {
 }
 
 func (l limit) String() string {
-	return fmt.Sprintf("sm,SM,um,UM=%d,%d,%d,%d", l.min, l.max, l.umin, l.umax)
+	return fmt.Sprintf("sm,SM=%d,%d um,UM=%d,%d", l.min, l.max, l.umin, l.umax)
 }
 
 func (l limit) intersect(l2 limit) limit {
@@ -1946,7 +1947,7 @@ func (ft *factsTable) flowLimit(v *Value) bool {
 		a := ft.limits[v.Args[0].ID]
 		b := ft.limits[v.Args[1].ID]
 		sub := ft.newLimit(v, a.sub(b, uint(v.Type.Size())*8))
-		mod := ft.detectSignedMod(v)
+		mod := ft.detectMod(v)
 		inferred := ft.detectSliceLenRelation(v)
 		return sub || mod || inferred
 	case OpNeg64, OpNeg32, OpNeg16, OpNeg8:
@@ -1965,6 +1966,30 @@ func (ft *factsTable) flowLimit(v *Value) bool {
 		b := ft.limits[v.Args[1].ID]
 		bitsize := uint(v.Type.Size()) * 8
 		return ft.newLimit(v, a.mul(b.exp2(bitsize), bitsize))
+	case OpRsh64x64, OpRsh64x32, OpRsh64x16, OpRsh64x8,
+		OpRsh32x64, OpRsh32x32, OpRsh32x16, OpRsh32x8,
+		OpRsh16x64, OpRsh16x32, OpRsh16x16, OpRsh16x8,
+		OpRsh8x64, OpRsh8x32, OpRsh8x16, OpRsh8x8:
+		a := ft.limits[v.Args[0].ID]
+		b := ft.limits[v.Args[1].ID]
+		if b.min >= 0 {
+			// Shift of negative makes a value closer to 0 (greater),
+			// so if a.min is negative, v.min is a.min>>b.min instead of a.min>>b.max,
+			// and similarly if a.max is negative, v.max is a.max>>b.max.
+			// Easier to compute min and max of both than to write sign logic.
+			vmin := min(a.min>>b.min, a.min>>b.max)
+			vmax := max(a.max>>b.min, a.max>>b.max)
+			return ft.signedMinMax(v, vmin, vmax)
+		}
+	case OpRsh64Ux64, OpRsh64Ux32, OpRsh64Ux16, OpRsh64Ux8,
+		OpRsh32Ux64, OpRsh32Ux32, OpRsh32Ux16, OpRsh32Ux8,
+		OpRsh16Ux64, OpRsh16Ux32, OpRsh16Ux16, OpRsh16Ux8,
+		OpRsh8Ux64, OpRsh8Ux32, OpRsh8Ux16, OpRsh8Ux8:
+		a := ft.limits[v.Args[0].ID]
+		b := ft.limits[v.Args[1].ID]
+		if b.min >= 0 {
+			return ft.unsignedMinMax(v, a.umin>>b.max, a.umax>>b.min)
+		}
 	case OpDiv64, OpDiv32, OpDiv16, OpDiv8:
 		a := ft.limits[v.Args[0].ID]
 		b := ft.limits[v.Args[1].ID]
@@ -1984,6 +2009,10 @@ func (ft *factsTable) flowLimit(v *Value) bool {
 			lim = lim.unsignedMax(a.umax / b.umin)
 		}
 		return ft.newLimit(v, lim)
+	case OpMod64, OpMod32, OpMod16, OpMod8:
+		return ft.modLimit(true, v, v.Args[0], v.Args[1])
+	case OpMod64u, OpMod32u, OpMod16u, OpMod8u:
+		return ft.modLimit(false, v, v.Args[0], v.Args[1])
 
 	case OpPhi:
 		// Compute the union of all the input phis.
@@ -2005,32 +2034,6 @@ func (ft *factsTable) flowLimit(v *Value) bool {
 		}
 		return ft.newLimit(v, l)
 	}
-	return false
-}
-
-// See if we can get any facts because v is the result of signed mod by a constant.
-// The mod operation has already been rewritten, so we have to try and reconstruct it.
-//
-//	x % d
-//
-// is rewritten as
-//
-//	x - (x / d) * d
-//
-// furthermore, the divide itself gets rewritten. If d is a power of 2 (d == 1<<k), we do
-//
-//	(x / d) * d = ((x + adj) >> k) << k
-//	            = (x + adj) & (-1<<k)
-//
-// with adj being an adjustment in case x is negative (see below).
-// if d is not a power of 2, we do
-//
-//	x / d = ... TODO ...
-func (ft *factsTable) detectSignedMod(v *Value) bool {
-	if ft.detectSignedModByPowerOfTwo(v) {
-		return true
-	}
-	// TODO: non-powers-of-2
 	return false
 }
 
@@ -2095,102 +2098,64 @@ func (ft *factsTable) detectSliceLenRelation(v *Value) (inferred bool) {
 	return inferred
 }
 
-func (ft *factsTable) detectSignedModByPowerOfTwo(v *Value) bool {
-	// We're looking for:
-	//
-	//   x % d ==
-	//   x - (x / d) * d
-	//
-	// which for d a power of 2, d == 1<<k, is done as
-	//
-	//   x - ((x + (x>>(w-1))>>>(w-k)) & (-1<<k))
-	//
-	// w = bit width of x.
-	// (>> = signed shift, >>> = unsigned shift).
-	// See ./_gen/generic.rules, search for "Signed divide by power of 2".
-
-	var w int64
-	var addOp, andOp, constOp, sshiftOp, ushiftOp Op
+// x%d has been rewritten to x - (x/d)*d.
+func (ft *factsTable) detectMod(v *Value) bool {
+	var opDiv, opDivU, opMul, opConst Op
 	switch v.Op {
 	case OpSub64:
-		w = 64
-		addOp = OpAdd64
-		andOp = OpAnd64
-		constOp = OpConst64
-		sshiftOp = OpRsh64x64
-		ushiftOp = OpRsh64Ux64
+		opDiv = OpDiv64
+		opDivU = OpDiv64u
+		opMul = OpMul64
+		opConst = OpConst64
 	case OpSub32:
-		w = 32
-		addOp = OpAdd32
-		andOp = OpAnd32
-		constOp = OpConst32
-		sshiftOp = OpRsh32x64
-		ushiftOp = OpRsh32Ux64
+		opDiv = OpDiv32
+		opDivU = OpDiv32u
+		opMul = OpMul32
+		opConst = OpConst32
 	case OpSub16:
-		w = 16
-		addOp = OpAdd16
-		andOp = OpAnd16
-		constOp = OpConst16
-		sshiftOp = OpRsh16x64
-		ushiftOp = OpRsh16Ux64
+		opDiv = OpDiv16
+		opDivU = OpDiv16u
+		opMul = OpMul16
+		opConst = OpConst16
 	case OpSub8:
-		w = 8
-		addOp = OpAdd8
-		andOp = OpAnd8
-		constOp = OpConst8
-		sshiftOp = OpRsh8x64
-		ushiftOp = OpRsh8Ux64
-	default:
-		return false
+		opDiv = OpDiv8
+		opDivU = OpDiv8u
+		opMul = OpMul8
+		opConst = OpConst8
 	}
 
-	x := v.Args[0]
-	and := v.Args[1]
-	if and.Op != andOp {
+	mul := v.Args[1]
+	if mul.Op != opMul {
 		return false
 	}
-	var add, mask *Value
-	if and.Args[0].Op == addOp && and.Args[1].Op == constOp {
-		add = and.Args[0]
-		mask = and.Args[1]
-	} else if and.Args[1].Op == addOp && and.Args[0].Op == constOp {
-		add = and.Args[1]
-		mask = and.Args[0]
-	} else {
+	div, con := mul.Args[0], mul.Args[1]
+	if div.Op == opConst {
+		div, con = con, div
+	}
+	if con.Op != opConst || (div.Op != opDiv && div.Op != opDivU) || div.Args[0] != v.Args[0] || div.Args[1].Op != opConst || div.Args[1].AuxInt != con.AuxInt {
 		return false
 	}
-	var ushift *Value
-	if add.Args[0] == x {
-		ushift = add.Args[1]
-	} else if add.Args[1] == x {
-		ushift = add.Args[0]
-	} else {
-		return false
-	}
-	if ushift.Op != ushiftOp {
-		return false
-	}
-	if ushift.Args[1].Op != OpConst64 {
-		return false
-	}
-	k := w - ushift.Args[1].AuxInt // Now we know k!
-	d := int64(1) << k             // divisor
-	sshift := ushift.Args[0]
-	if sshift.Op != sshiftOp {
-		return false
-	}
-	if sshift.Args[0] != x {
-		return false
-	}
-	if sshift.Args[1].Op != OpConst64 || sshift.Args[1].AuxInt != w-1 {
-		return false
-	}
-	if mask.AuxInt != -d {
-		return false
-	}
+	return ft.modLimit(div.Op == opDiv, v, v.Args[0], con)
+}
 
-	// All looks ok. x % d is at most +/- d-1.
-	return ft.signedMinMax(v, -d+1, d-1)
+// modLimit sets v with facts derived from v = p % q.
+func (ft *factsTable) modLimit(signed bool, v, p, q *Value) bool {
+	a := ft.limits[p.ID]
+	b := ft.limits[q.ID]
+	if signed {
+		if a.min < 0 && b.min > 0 {
+			return ft.signedMinMax(v, -(b.max - 1), b.max-1)
+		}
+		if !(a.nonnegative() && b.nonnegative()) {
+			// TODO: we could handle signed limits but I didn't bother.
+			return false
+		}
+		if a.min >= 0 && b.min > 0 {
+			ft.setNonNegative(v)
+		}
+	}
+	// Underflow in the arithmetic below is ok, it gives to MaxUint64 which does nothing to the limit.
+	return ft.unsignedMax(v, min(a.umax, b.umax-1))
 }
 
 // getBranch returns the range restrictions added by p
@@ -2468,6 +2433,10 @@ func addLocalFacts(ft *factsTable, b *Block) {
 			// TODO: investigate how to always add facts without much slowdown, see issue #57959
 			//ft.update(b, v, v.Args[0], unsigned, gt|eq)
 			//ft.update(b, v, v.Args[1], unsigned, gt|eq)
+		case OpDiv64, OpDiv32, OpDiv16, OpDiv8:
+			if ft.isNonNegative(v.Args[0]) && ft.isNonNegative(v.Args[1]) {
+				ft.update(b, v, v.Args[0], unsigned, lt|eq)
+			}
 		case OpDiv64u, OpDiv32u, OpDiv16u, OpDiv8u,
 			OpRsh8Ux64, OpRsh8Ux32, OpRsh8Ux16, OpRsh8Ux8,
 			OpRsh16Ux64, OpRsh16Ux32, OpRsh16Ux16, OpRsh16Ux8,
@@ -2510,10 +2479,7 @@ func addLocalFacts(ft *factsTable, b *Block) {
 			}
 			ft.update(b, v, v.Args[0], unsigned, lt|eq)
 		case OpMod64, OpMod32, OpMod16, OpMod8:
-			a := ft.limits[v.Args[0].ID]
-			b := ft.limits[v.Args[1].ID]
-			if !(a.nonnegative() && b.nonnegative()) {
-				// TODO: we could handle signed limits but I didn't bother.
+			if !ft.isNonNegative(v.Args[0]) || !ft.isNonNegative(v.Args[1]) {
 				break
 			}
 			fallthrough
@@ -2631,14 +2597,30 @@ func addLocalFactsPhi(ft *factsTable, v *Value) {
 	ft.update(b, v, y, dom, rel)
 }
 
-var ctzNonZeroOp = map[Op]Op{OpCtz8: OpCtz8NonZero, OpCtz16: OpCtz16NonZero, OpCtz32: OpCtz32NonZero, OpCtz64: OpCtz64NonZero}
+var ctzNonZeroOp = map[Op]Op{
+	OpCtz8:  OpCtz8NonZero,
+	OpCtz16: OpCtz16NonZero,
+	OpCtz32: OpCtz32NonZero,
+	OpCtz64: OpCtz64NonZero,
+}
 var mostNegativeDividend = map[Op]int64{
 	OpDiv16: -1 << 15,
 	OpMod16: -1 << 15,
 	OpDiv32: -1 << 31,
 	OpMod32: -1 << 31,
 	OpDiv64: -1 << 63,
-	OpMod64: -1 << 63}
+	OpMod64: -1 << 63,
+}
+var unsignedOp = map[Op]Op{
+	OpDiv8:  OpDiv8u,
+	OpDiv16: OpDiv16u,
+	OpDiv32: OpDiv32u,
+	OpDiv64: OpDiv64u,
+	OpMod8:  OpMod8u,
+	OpMod16: OpMod16u,
+	OpMod32: OpMod32u,
+	OpMod64: OpMod64u,
+}
 
 var bytesizeToConst = [...]Op{
 	8 / 8:  OpConst8,
@@ -2664,6 +2646,17 @@ var bytesizeToAnd = [...]Op{
 func simplifyBlock(sdom SparseTree, ft *factsTable, b *Block) {
 	for iv, v := range b.Values {
 		switch v.Op {
+		case OpStaticLECall:
+			if b.Func.pass.debug > 0 && len(v.Args) == 2 {
+				fn := auxToCall(v.Aux).Fn
+				if fn != nil && strings.Contains(fn.String(), "prove") {
+					// Print bounds of any argument to single-arg function with "prove" in name,
+					// for debugging and especially for test/prove.go.
+					// (v.Args[1] is mem).
+					x := v.Args[0]
+					b.Func.Warnl(v.Pos, "Proved %v (%v)", ft.limits[x.ID], x)
+				}
+			}
 		case OpSlicemask:
 			// Replace OpSlicemask operations in b with constants where possible.
 			cap := v.Args[0]
@@ -2713,21 +2706,8 @@ func simplifyBlock(sdom SparseTree, ft *factsTable, b *Block) {
 		case OpRsh8x8, OpRsh8x16, OpRsh8x32, OpRsh8x64,
 			OpRsh16x8, OpRsh16x16, OpRsh16x32, OpRsh16x64,
 			OpRsh32x8, OpRsh32x16, OpRsh32x32, OpRsh32x64,
-			OpRsh64x8, OpRsh64x16, OpRsh64x32, OpRsh64x64:
-			// Check whether, for a >> b, we know that a is non-negative
-			// and b is all of a's bits except the MSB. If so, a is shifted to zero.
-			bits := 8 * v.Args[0].Type.Size()
-			if v.Args[1].isGenericIntConst() && v.Args[1].AuxInt >= bits-1 && ft.isNonNegative(v.Args[0]) {
-				if b.Func.pass.debug > 0 {
-					b.Func.Warnl(v.Pos, "Proved %v shifts to zero", v.Op)
-				}
-				v.reset(bytesizeToConst[bits/8])
-				v.AuxInt = 0
-				break // Be sure not to fallthrough - this is no longer OpRsh.
-			}
-			// If the Rsh hasn't been replaced with 0, still check if it is bounded.
-			fallthrough
-		case OpLsh8x8, OpLsh8x16, OpLsh8x32, OpLsh8x64,
+			OpRsh64x8, OpRsh64x16, OpRsh64x32, OpRsh64x64,
+			OpLsh8x8, OpLsh8x16, OpLsh8x32, OpLsh8x64,
 			OpLsh16x8, OpLsh16x16, OpLsh16x32, OpLsh16x64,
 			OpLsh32x8, OpLsh32x16, OpLsh32x32, OpLsh32x64,
 			OpLsh64x8, OpLsh64x16, OpLsh64x32, OpLsh64x64,
@@ -2746,34 +2726,51 @@ func simplifyBlock(sdom SparseTree, ft *factsTable, b *Block) {
 					b.Func.Warnl(v.Pos, "Proved %v bounded", v.Op)
 				}
 			}
-		case OpDiv16, OpDiv32, OpDiv64, OpMod16, OpMod32, OpMod64:
-			// On amd64 and 386 fix-up code can be avoided if we know
-			//  the divisor is not -1 or the dividend > MinIntNN.
-			// Don't modify AuxInt on other architectures,
-			// as that can interfere with CSE.
-			// TODO: add other architectures?
-			if b.Func.Config.arch != "386" && b.Func.Config.arch != "amd64" {
+		case OpDiv8, OpDiv16, OpDiv32, OpDiv64, OpMod8, OpMod16, OpMod32, OpMod64:
+			p, q := ft.limits[v.Args[0].ID], ft.limits[v.Args[1].ID] // p/q
+			if p.nonnegative() && q.nonnegative() {
+				if b.Func.pass.debug > 0 {
+					b.Func.Warnl(v.Pos, "Proved %v is unsigned", v.Op)
+				}
+				v.Op = unsignedOp[v.Op]
+				v.AuxInt = 0
 				break
 			}
-			divr := v.Args[1]
-			divrLim := ft.limits[divr.ID]
-			divd := v.Args[0]
-			divdLim := ft.limits[divd.ID]
-			if divrLim.max < -1 || divrLim.min > -1 || divdLim.min > mostNegativeDividend[v.Op] {
+			// Fixup code can be avoided on x86 if we know
+			//  the divisor is not -1 or the dividend > MinIntNN.
+			if v.Op != OpDiv8 && v.Op != OpMod8 && (q.max < -1 || q.min > -1 || p.min > mostNegativeDividend[v.Op]) {
 				// See DivisionNeedsFixUp in rewrite.go.
-				// v.AuxInt = 1 means we have proved both that the divisor is not -1
-				// and that the dividend is not the most negative integer,
+				// v.AuxInt = 1 means we have proved that the divisor is not -1
+				// or that the dividend is not the most negative integer,
 				// so we do not need to add fix-up code.
-				v.AuxInt = 1
 				if b.Func.pass.debug > 0 {
 					b.Func.Warnl(v.Pos, "Proved %v does not need fix-up", v.Op)
 				}
+				// Only usable on amd64 and 386, and only for ≥ 16-bit ops.
+				// Don't modify AuxInt on other architectures, as that can interfere with CSE.
+				// (Print the debug info above always, so that test/prove.go can be
+				// checked on non-x86 systems.)
+				// TODO: add other architectures?
+				if b.Func.Config.arch == "386" || b.Func.Config.arch == "amd64" {
+					v.AuxInt = 1
+				}
 			}
 		case OpMul64, OpMul32, OpMul16, OpMul8:
+			if vl := ft.limits[v.ID]; vl.min == vl.max || vl.umin == vl.umax {
+				// v is going to be constant folded away; don't "optimize" it.
+				break
+			}
 			x := v.Args[0]
 			xl := ft.limits[x.ID]
 			y := v.Args[1]
 			yl := ft.limits[y.ID]
+			if xl.umin == xl.umax && isPowerOfTwo(int64(xl.umin)) ||
+				xl.min == xl.max && isPowerOfTwo(xl.min) ||
+				yl.umin == yl.umax && isPowerOfTwo(int64(yl.umin)) ||
+				yl.min == yl.max && isPowerOfTwo(yl.min) {
+				// 0,1 * a power of two is better done as a shift
+				break
+			}
 			switch xOne, yOne := xl.umax <= 1, yl.umax <= 1; {
 			case xOne && yOne:
 				v.Op = bytesizeToAnd[v.Type.Size()]
@@ -2807,6 +2804,7 @@ func simplifyBlock(sdom SparseTree, ft *factsTable, b *Block) {
 				}
 			}
 		}
+
 		// Fold provable constant results.
 		// Helps in cases where we reuse a value after branching on its equality.
 		for i, arg := range v.Args {

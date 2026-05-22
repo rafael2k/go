@@ -1,0 +1,27 @@
+# Probe 9front loopback TCP close-while-writing behavior.
+
+probe=/n/dos/bin/loopback-close-probe
+
+fn setupnet {
+	echo TEST network-setup
+	if(! test -e /srv/cs && ! test -e /net/cs) {
+		ndb/cs
+		sleep 1
+	}
+	ip/ipconfig loopback /dev/null 127.0.0.1 255.0.0.0
+	echo network-setup loopback4 $status
+	ip/ipconfig loopback /dev/null ::1 /128
+	echo network-setup loopback6 $status
+	echo DONE network-setup $status
+}
+
+setupnet
+
+echo TEST loopback-close-probe
+if(! test -x $probe) {
+	echo loopback-close-probe missing or not executable: $probe
+	echo DONE loopback-close-probe missing
+	exit missing
+}
+$probe
+echo DONE loopback-close-probe $status

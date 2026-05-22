@@ -1,0 +1,49 @@
+# Stress-test net.TestVariousDeadlines on plan9/amd64 (-smp >1) to
+# reproduce the SMP race seen with the unpatched internal/poll
+# implementation, and confirm a candidate fix.
+#
+# Usage (from host):
+#   PLAN9_TEST_SCRIPT=/n/dos/misc/plan9/amd64/guest-deadline-stress.rc \
+#     PLAN9_TEST_WAIT=900 PLAN9_MEM=3072 PLAN9_SMP=4 \
+#     misc/plan9/amd64/run-qemu-tests.sh -- 20
+#
+# The first positional argument is the -count value passed to go test
+# (default 20).  Any further arguments are appended to the go test
+# command line, e.g.:
+#   ... run-qemu-tests.sh -- 10 -short
+#
+# Each -count iteration cycles through the 19 deadline values in
+# net.TestVariousDeadlines (1ns ... 1s) and exercises the
+# Plan 9 asyncIO/timer interaction.
+
+go=/n/dos/bin/go
+
+fn setupnet {
+	echo TEST network-setup
+	kill cs | rc >[2]/dev/null
+	kill dns | rc >[2]/dev/null
+	sleep 1
+	ip/ipconfig loopback /dev/null 127.0.0.1 255.0.0.0
+	ip/ipconfig loopback /dev/null ::1 /128
+	if(test -e /net/ether0) {
+		ip/ipconfig ether /net/ether0 >[2]/dev/null
+	}
+	ndb/cs
+	sleep 1
+	ndb/dns -r &
+	sleep 1
+	echo DONE network-setup
+}
+
+count=20
+if(! ~ $#* 0) {
+	count=$1
+	shift
+}
+
+setupnet
+
+echo TEST TestVariousDeadlines stress count $count flags $*
+GOFLAGS='-vet=off' GOROOT=/n/dos GOCACHE=/tmp/gocache GOTMPDIR=/tmp/gotmp \
+	$go test -p 1 -timeout 60m -run '^TestVariousDeadlines$' -count $count $* -v net
+echo DONE TestVariousDeadlines stress $status

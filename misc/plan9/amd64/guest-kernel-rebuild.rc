@@ -1,0 +1,69 @@
+#!/bin/rc
+# Apply the loopback tcpsplice fix to /sys/src/9/ip/tcp.c and rebuild
+# the 9front amd64 kernel.  Intended to be run from a 9front guest
+# that boots with the host's tmp-9front-amd64-goroot share mounted at
+# /n/dos (containing misc/plan9/amd64/tcp.c.patched).
+
+echo TEST kernel-rebuild
+
+if(! test -f /sys/src/9/ip/tcp.c){
+	echo kernel-rebuild: missing /sys/src/9/ip/tcp.c, aborting
+	exit nokernelsrc
+}
+
+if(! test -f /n/dos/misc/plan9/amd64/tcp.c.patched){
+	echo kernel-rebuild: missing /n/dos/misc/plan9/amd64/tcp.c.patched
+	exit nopatch
+}
+
+echo kernel-rebuild: backing up original tcp.c
+cp /sys/src/9/ip/tcp.c /sys/src/9/ip/tcp.c.orig
+
+echo kernel-rebuild: installing patched tcp.c
+cp /n/dos/misc/plan9/amd64/tcp.c.patched /sys/src/9/ip/tcp.c
+
+echo kernel-rebuild: building 9pc64
+cd /sys/src/9/pc64
+mk clean
+mk 'CONF=pc64' install
+build_rc=$status
+echo kernel-rebuild: build exit status $build_rc
+if(! ~ $build_rc ''){
+	echo kernel-rebuild: build failed
+	exit buildfailed
+}
+
+if(! test -f /amd64/9pc64){
+	echo kernel-rebuild: missing /amd64/9pc64 after install
+	exit noimage
+}
+
+bootdisk=()
+for(disk in /dev/sd*){
+	if(test -f $disk/fs)
+		bootdisk=$disk
+}
+if(~ $#bootdisk 0){
+	echo kernel-rebuild: no boot disk with hjfs found
+	exit nobootdisk
+}
+bootpart=$bootdisk/9fat
+if(! test -f $bootpart){
+	bootpart=$bootdisk/dos
+}
+if(! test -f $bootpart){
+	echo kernel-rebuild: no 9fat or dos partition on boot disk $bootdisk
+	exit nobootpart
+}
+echo kernel-rebuild: copying 9pc64 into $bootpart via dossrv
+
+mkdir -p /n/bootdos
+dossrv -f $bootpart bootdos >/dev/null >[2=1]
+mount -c /srv/bootdos /n/bootdos
+
+cp /amd64/9pc64 /n/bootdos/9pc64
+
+echo DONE kernel-rebuild
+echo SUMMARY new kernel installed to $bootpart as 9pc64
+ls -l /n/bootdos/9pc64
+unmount /n/bootdos

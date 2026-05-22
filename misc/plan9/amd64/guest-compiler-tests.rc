@@ -1,0 +1,89 @@
+# Focused native compiler tests for plan9/amd64.
+# Mirrors misc/plan9/arm64/guest-compiler-tests.rc with amd64 defaults.
+
+go=/n/dos/bin/go
+testflags=()
+
+fn setupnet {
+	echo TEST network-setup
+	# 9front's boot sequence starts ndb/cs (and sometimes ndb/dns) before
+	# any IP interfaces exist, so their `dnsipvers` is 0 forever and they
+	# refuse to resolve anything (`cs: no ip address`).  Kill them now and
+	# restart after interfaces are up so we are csuser and cs sees the
+	# interfaces.  9front's kill(1) uses '/' as its sed delimiter, so it
+	# can't take 'ndb/cs' as a pattern; ps prints only the basename anyway.
+	kill cs | rc >[2]/dev/null
+	kill dns | rc >[2]/dev/null
+	sleep 1
+
+	ip/ipconfig loopback /dev/null 127.0.0.1 255.0.0.0
+	echo network-setup loopback4 $status
+	ip/ipconfig loopback /dev/null ::1 /128
+	echo network-setup loopback6 $status
+
+	# Bring up the virtio NIC over slirp DHCP if it exists; this gives us
+	# a routable IPv4 (10.0.2.15 by default), a default route, and DNS
+	# pointing at 10.0.2.3.  Without it cs / dns have nothing to resolve
+	# against and LookupHost-style tests get bogus errors.
+	if(test -e /net/ether0) {
+		echo network-setup ether0 DHCP
+		ip/ipconfig ether /net/ether0 >[2]/dev/null
+		echo network-setup ether0 status $status
+	}
+
+	ndb/cs
+	sleep 1
+	ndb/dns -r &
+	sleep 1
+
+	if(test -e /net/ndb) {
+		echo network-setup /net/ndb
+		cat /net/ndb
+	}
+	echo network-setup /net/ipselftab:
+	cat /net/ipselftab >[2=1]
+	echo DONE network-setup $status
+}
+
+fn setupswap {
+	echo TEST swap-setup
+	swapfile=/tmp/swap
+	swapmb=1024
+	if(! test -e $swapfile) {
+		echo creating $swapmb MB swap at $swapfile
+		dd -if /dev/zero -of $swapfile -bs 1048576 -count $swapmb
+	}
+	swap $swapfile
+	echo DONE swap-setup $status
+}
+
+fn runtest {
+	echo TEST $1 $testflags
+	GOFLAGS='-vet=off' GOROOT=/n/dos GOCACHE=/tmp/gocache GOTMPDIR=/tmp/gotmp $go test -short -p 1 -timeout 60m $testflags $1
+	echo DONE $1 $status
+}
+
+while(! ~ $#* 0 && ~ $1 -*) {
+	testflags=($testflags $1)
+	shift
+}
+
+if(~ $#* 0) {
+	tests=(cmd/compile/internal/syntax cmd/internal/obj/x86 cmd/asm/internal/asm cmd/compile/internal/types cmd/compile/internal/types2 cmd/compile/internal/ssa cmd/compile/internal/ssagen cmd/compile/internal/test)
+}
+if not {
+	tests=$*
+}
+
+setupnet
+setupswap
+
+for(pkg in $tests) {
+	runtest $pkg
+}
+
+if(~ $#* 0) {
+	echo TEST vet-enabled cmd/compile/internal/syntax
+	GOROOT=/n/dos GOCACHE=/tmp/gocache GOTMPDIR=/tmp/gotmp $go test -short -p 1 -timeout 60m cmd/compile/internal/syntax
+	echo DONE vet-enabled cmd/compile/internal/syntax $status
+}

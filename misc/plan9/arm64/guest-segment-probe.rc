@@ -1,0 +1,12 @@
+# Probe 9front arm64 memory segment behavior relevant to Go heap reservations.
+
+probe=/n/dos/bin/segment-memory-probe
+
+echo TEST segment-memory-probe
+if(! test -x $probe) {
+	echo segment-memory-probe missing or not executable: $probe
+	echo DONE segment-memory-probe missing
+	exit missing
+}
+$probe
+echo DONE segment-memory-probe $status

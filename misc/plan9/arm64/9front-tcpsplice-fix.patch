@@ -1,0 +1,86 @@
+9front TCP loopback splice: propagate peer close to writer
+
+When two TCP conversations on the same kernel connect to each other on
+loopback, /sys/src/9/ip/tcp.c tcpincoming() splices them via
+tcpsplice(), which installs a bypass function (tcpbypass) on each side's
+wq that copies blocks directly into the other side's rq.  This avoids
+the cost of running the TCP state machine on packets that never leave
+the kernel.
+
+The splice handling does not propagate peer close to the writer.  When
+one side calls "close" on its ctl file, tcpclose() (case Established
+with tcb->bypass != nil) hangs up the OTHER side's rq and then calls
+localclose() on itself, which clears its own bypass.  The other side's
+wq is left intact, with the bypass kick still pointing at us.
+
+When the other side's user then writes more data, qbwrite() in
+sys/src/9/port/qio.c (line ~1027) calls the bypass without checking for
+errors and returns blocklen(b) regardless of the outcome.  tcpbypass()
+sees that o->ptcl->bypass is now nil (because we cleared it), takes the
+"frees the block" branch and silently returns.  The writer sees a
+successful write of len bytes that were actually dropped on the floor.
+No error, no FIN, no RST -- writes keep "succeeding" forever.
+
+This breaks Go test code that relies on the usual TCP close semantics
+("after the peer closes its half, my next Write eventually fails").
+Several net/http and crypto/tls tests use that pattern on loopback to
+test cancellation and timeout paths.  See for example
+net/http.TestServerNoWriteTimeout and
+net/http.TestTransportReqCancelerCleanupOnRequestBodyWriteError, which
+were filed as plan9-specific skips while this kernel bug exists.
+
+The fix is small: when tcpsetstate(Closed) tears down a spliced
+conversation, it should also hang up the OTHER side's wq so that the
+other side's next user write returns an error from qbwrite() instead of
+running the now-broken bypass.
+
+--- a/sys/src/9/ip/tcp.c
++++ b/sys/src/9/ip/tcp.c
+@@ -412,8 +412,15 @@ tcpsetstate(Conv *s, uchar newstate)
+ 		qclose(s->rq);
+ 		qclose(s->wq);
+ 		qclose(s->eq);
+ 		if(tcb->bypass != nil){
++			Conv *o = tcb->bypass;
++			Tcpctl *otcb = (Tcpctl*)o->ptcl;
++			if(otcb->bypass == s){
++				otcb->bypass = nil;
++				qsetbypass(o->wq, nil);
++				qhangup(o->wq, "connection closed");
++			}
+ 			tcb->bypass = nil;
+ 			qsetbypass(s->wq, nil);
+ 		}
+ 		break;
+
+A defensive change in tcpbypass() that error()s when the splice peer is
+gone is also safe and easier to reason about:
+
+--- a/sys/src/9/ip/tcp.c
++++ b/sys/src/9/ip/tcp.c
+@@ -1589,10 +1589,11 @@ static void
+ tcpbypass(void *arg, Block *b)
+ {
+ 	Conv *c = (Conv*)arg;
+ 	Tcpctl *tcb = (Tcpctl*)c->ptcl;
+ 	Conv *o = tcb->bypass;
+
+ 	if(o == nil || ((Tcpctl*)o->ptcl)->bypass != c){
+ 		freeblist(b);
+-		return;
++		error("connection closed");
+ 	}
+ 	qbwrite(o->rq, b);
+ }
+
+With either fix, the loopback-close-probe at
+misc/plan9/arm64/loopback-close-probe.go reports the writer Write()
+failing within a few milliseconds of the peer's Close(), as on Linux
+and the BSDs, instead of accepting 1 GiB of dropped data.
+
+The same bug should exist in 9legacy, since the splice logic predates
+the 9front fork.  This patch is offered as a starting point for both
+kernels; the in-tree maintainers may prefer a slightly different
+shape (e.g. clearing the bypass and hanging up the wq from within the
+existing tcpclose() Established+bypass arm rather than from
+tcpsetstate()).

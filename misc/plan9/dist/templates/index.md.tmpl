@@ -1,0 +1,78 @@
+# Go for 9front (plan9/amd64 & plan9/arm64)
+
+Pre-built Go toolchains for [9front](http://9front.org/) on amd64 and arm64.
+
+Built from the in-progress
+[plan9/arm64 port](https://go.dev/issue/76272) on top of upstream Go.
+
+- Version: `@@VERSION@@`
+- Source:  `@@SOURCE_REPO@@` branch `@@SOURCE_BRANCH@@`,
+  commit `@@SOURCE_COMMIT@@` ("all: add plan9/arm64 port")
+- Upstream base: Go `@@UPSTREAM_BASE@@`
+- Cross-compiled with `cmd/distpack` (upstream Go's release packager).
+- Built on `@@BUILD_DATE@@`.
+
+## Downloads
+
+| platform     | file                     | sha256 |
+|--------------|--------------------------|--------|
+| plan9/amd64  | [go-plan9-amd64.tar.gz](go-plan9-amd64.tar.gz) | `@@SHA256_AMD64@@` |
+| plan9/arm64  | [go-plan9-arm64.tar.gz](go-plan9-arm64.tar.gz) | `@@SHA256_ARM64@@` |
+| source       | [go-src.tar.gz](go-src.tar.gz)                 | `@@SHA256_SRC@@`   |
+
+Checksum manifest: [SHA256SUMS](SHA256SUMS)
+
+## Install on 9front
+
+Pick the tarball matching `$objtype` (`amd64` or `arm64`).
+
+```
+% cd /sys/lib
+% hget @@BASE_URL@@/go-plan9-$objtype.tar.gz | gunzip | tar x
+% bind -bc /sys/lib/go/bin /$objtype/bin
+% GOROOT=/sys/lib/go go version
+```
+
+To make it persistent, add to `$home/lib/profile`:
+
+```
+GOROOT=/sys/lib/go
+path=($path /sys/lib/go/bin)
+```
+
+## Verify
+
+```
+% hget @@BASE_URL@@/SHA256SUMS > /tmp/SHA256SUMS
+% sha256sum go-plan9-$objtype.tar.gz
+% grep go-plan9-$objtype.tar.gz /tmp/SHA256SUMS
+```
+
+The two sha256 hex strings must match.
+
+## Tarball layout
+
+Each archive expands to a single top-level `go/` directory (upstream
+convention):
+
+```
+go/
+  VERSION  LICENSE  PATENTS  README.md
+  api/  doc/  lib/  misc/  src/  test/
+  bin/{go,gofmt}                        # plan9/$objtype binaries
+  pkg/tool/plan9_$objtype/{compile,link,asm,vet,cgo,...}
+  pkg/include/
+```
+
+## Status
+
+- **plan9/amd64**: supported upstream. This build also includes the
+  deadline-handling and `tcpsplice` improvements made while bringing up
+  arm64.
+- **plan9/arm64**: new port. See the merge-pending
+  [Gerrit CL 719643](https://go-review.googlesource.com/c/go/+/719643).
+- **9front kernel**: this Go release expects a 9front kernel containing
+  the `tcpsplice`-close race fix
+  (`bypeerclosed` field in `Tcpctl`, handled in `tcpsetstate` and
+  `tcpclose`).
+  A pre-patched 9front kernel source tarball can be requested separately.

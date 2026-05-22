@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Go for 9front (plan9/amd64 &amp; plan9/arm64)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root { color-scheme: light dark; }
+body  { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        max-width: 780px; margin: 2.5rem auto; padding: 0 1rem; }
+h1    { margin: 0 0 .25rem 0; }
+h2    { margin-top: 2rem; }
+small { color: #666; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+th,td { border-bottom: 1px solid #ddd; padding: .4rem .6rem; text-align: left; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+pre   { background: rgba(127,127,127,.12); padding: .8rem 1rem;
+        border-radius: 6px; overflow-x: auto; }
+.sha  { font-size: 12px; word-break: break-all; color: #555; }
+a     { color: #2a64c5; }
+@media (prefers-color-scheme: dark) {
+  body { background: #11151a; color: #e6e6e6; }
+  small, .sha { color: #aaa; }
+  th, td { border-color: #2a3038; }
+  pre { background: #1b2027; }
+  a { color: #6aa6ff; }
+}
+</style>
+</head>
+<body>
+
+<h1>Go for 9front</h1>
+<small>Pre-built Go toolchains for plan9/amd64 and plan9/arm64.</small>
+
+<p>Built from the in-progress
+<a href="https://go.dev/issue/76272">plan9/arm64 port</a>
+on top of upstream Go.</p>
+
+<ul>
+  <li>Version: <code>@@VERSION@@</code></li>
+  <li>Source: <code>@@SOURCE_REPO@@</code>, branch <code>@@SOURCE_BRANCH@@</code>,
+      commit <code>@@SOURCE_COMMIT@@</code> ("all: add plan9/arm64 port")</li>
+  <li>Upstream base: Go <code>@@UPSTREAM_BASE@@</code></li>
+  <li>Cross-compiled with <code>cmd/distpack</code> (upstream Go's release packager).</li>
+  <li>Built on <code>@@BUILD_DATE@@</code>.</li>
+</ul>
+
+<h2>Downloads</h2>
+<table>
+  <thead>
+    <tr><th>platform</th><th>file</th><th>size</th><th>sha256</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>plan9/amd64</td>
+      <td><a href="go-plan9-amd64.tar.gz">go-plan9-amd64.tar.gz</a></td>
+      <td>@@SIZE_AMD64@@</td>
+      <td class="sha">@@SHA256_AMD64@@</td>
+    </tr>
+    <tr>
+      <td>plan9/arm64</td>
+      <td><a href="go-plan9-arm64.tar.gz">go-plan9-arm64.tar.gz</a></td>
+      <td>@@SIZE_ARM64@@</td>
+      <td class="sha">@@SHA256_ARM64@@</td>
+    </tr>
+    <tr>
+      <td>source</td>
+      <td><a href="go-src.tar.gz">go-src.tar.gz</a></td>
+      <td>@@SIZE_SRC@@</td>
+      <td class="sha">@@SHA256_SRC@@</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Checksum manifest: <a href="SHA256SUMS">SHA256SUMS</a></p>
+
+<h2>Install on 9front</h2>
+
+<p>Pick the tarball matching <code>$objtype</code> (<code>amd64</code> or
+<code>arm64</code>):</p>
+
+<pre>% cd /sys/lib
+% hget @@BASE_URL@@/go-plan9-$objtype.tar.gz | gunzip | tar x
+% bind -bc /sys/lib/go/bin /$objtype/bin
+% GOROOT=/sys/lib/go go version</pre>
+
+<p>To make it persistent, add to <code>$home/lib/profile</code>:</p>
+
+<pre>GOROOT=/sys/lib/go
+path=($path /sys/lib/go/bin)</pre>
+
+<h2>Verify</h2>
+
+<pre>% hget @@BASE_URL@@/SHA256SUMS &gt; /tmp/SHA256SUMS
+% sha256sum go-plan9-$objtype.tar.gz
+% grep go-plan9-$objtype.tar.gz /tmp/SHA256SUMS</pre>
+
+<p>The two sha256 hex strings must match.</p>
+
+<h2>Tarball layout</h2>
+
+<p>Each archive expands to a single top-level <code>go/</code> directory
+(upstream convention):</p>
+
+<pre>go/
+  VERSION  LICENSE  PATENTS  README.md
+  api/  doc/  lib/  misc/  src/  test/
+  bin/{go,gofmt}                        # plan9/$objtype binaries
+  pkg/tool/plan9_$objtype/{compile,link,asm,vet,cgo,...}
+  pkg/include/</pre>
+
+<h2>Status</h2>
+
+<ul>
+  <li><b>plan9/amd64</b>: supported upstream. This build also includes the
+  deadline-handling and <code>tcpsplice</code> improvements made while
+  bringing up arm64.</li>
+  <li><b>plan9/arm64</b>: new port. See the merge-pending
+  <a href="https://go-review.googlesource.com/c/go/+/719643">Gerrit CL 719643</a>.</li>
+  <li><b>9front kernel</b>: this Go release expects a 9front kernel
+  containing the <code>tcpsplice</code>-close race fix
+  (<code>bypeerclosed</code> field in <code>Tcpctl</code>, handled in
+  <code>tcpsetstate</code> and <code>tcpclose</code>).
+  A pre-patched 9front kernel source tarball can be requested separately.</li>
+</ul>
+
+</body>
+</html>

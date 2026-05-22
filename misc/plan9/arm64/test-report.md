@@ -892,3 +892,37 @@ not affected by the harness or the kernel race (Miller's PS13
 review); the new `internal/poll` defenses are conservative
 (only override `n==0` results, only spin for sub-ms deadlines) and
 apply to all `plan9/*` ports.
+
+## Update: dropped all tcpsplice short-mode waivers from upstream
+
+The four short-mode package-level skips in `crypto/tls`,
+`net/http`, `net/http/httputil`, `net/http/internal/http2` and the
+two per-test skips in `net/http` (`TestServerNoWriteTimeout`,
+`TestTransportReqCancelerCleanupOnRequestBodyWriteError`) have
+been removed from `master` -- applying the same logic Dr. Miller
+used in PS13 for the three `net/*` skips: the kernel race is
+9front-specific, does not reproduce on his 9legacy builder, and
+the 9front fix is now mainline-ready on `tcpsplice-close-fix`.
+
+The `internal/testenv.CPUIsSlow` plan9/arm64 hack was also
+removed -- it only fired because *our QEMU TCG harness* serializes
+the guest on one host thread, not because real plan9/arm64
+hardware is slow.  Builders that need the slow-CPU code path can
+pass `-short` (which the TCG harness already does for dist runs)
+or extend `CPUIsSlow` locally.
+
+Upstream-bound waivers remaining on `master`:
+
+* none specific to `plan9/arm64`; the only `runtime.GOOS == "plan9"`
+  skips in the standard library that we touch are the pre-existing
+  ones (`testServerHijackGetsBackgroundByte` issues 18657 / 17906,
+  the `runtime` cgo-pthreads skips, etc.).
+
+| Failure | Root cause | Fix layer |
+|---|---|---|
+| `TestLookupNonLDH` | 9front `cs` has no routable interface in QEMU | harness: DHCP + non-transitional virtio on arm64 |
+| `TestWritevError`  | 9front kernel tcpsplice peer-close bug      | 9front kernel patch `c95f8567c`            |
+| `TestVariousDeadlines` | Go `internal/poll` deadline-vs-syscall snapshot race, exposed by 9front loopback FIN-RST race under SMP | Go: `internal/poll/fd_plan9.go` (deadline error preference + sub-ms spin); 9front: `sys/src/9/ip/tcp.c` (`bypeerclosed`, `c6ad842bf`) |
+| `crypto/tls`, `net/http`, `net/http/httputil`, `net/http/internal/http2` short-mode skips | same 9front tcpsplice peer-close bug | dropped; covered by `c95f8567c` + `c6ad842bf` |
+| `TestServerNoWriteTimeout`, `TestTransportReqCancelerCleanupOnRequestBodyWriteError` (per-test plan9 skips) | same 9front tcpsplice peer-close bug | dropped; covered by `c95f8567c` |
+| `internal/testenv.CPUIsSlow == true` on plan9/arm64 | QEMU TCG harness artifact, not real hardware | dropped |

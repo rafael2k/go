@@ -24,7 +24,33 @@ Checksum manifest: [SHA256SUMS](SHA256SUMS)
 
 ## Install on 9front
 
-Pick the tarball matching `$objtype` (`amd64` or `arm64`).
+### Option A: install-go.rc (recommended)
+
+One-shot installer that downloads the tarball for `$objtype`, verifies
+its sha256, restarts `webfs`, and extracts into `$goroot` (default
+`/sys/lib/go`):
+
+```
+% hget @@BASE_URL@@/install-go.rc | rc -- -y
+```
+
+Or, fetch first if you want to read it before running:
+
+```
+% hget @@BASE_URL@@/install-go.rc > /tmp/install-go.rc
+% rc /tmp/install-go.rc -y
+```
+
+Available flags:
+
+- `-base URL`     override the download root (default `@@BASE_URL@@`)
+- `-goroot DIR`   override the install location (default `/sys/lib/go`)
+- `-arch ARCH`    override `$objtype` (`amd64` or `arm64`)
+- `-y`            non-interactive: back up any existing `$goroot`
+
+### Option B: manual
+
+Pick the tarball matching `$objtype` (`amd64` or `arm64`):
 
 ```
 % cd /sys/lib
@@ -33,7 +59,9 @@ Pick the tarball matching `$objtype` (`amd64` or `arm64`).
 % GOROOT=/sys/lib/go go version
 ```
 
-To make it persistent, add to `$home/lib/profile`:
+### After install
+
+To make `go` available in every shell, add to `$home/lib/profile`:
 
 ```
 GOROOT=/sys/lib/go
@@ -44,7 +72,7 @@ path=($path /sys/lib/go/bin)
 
 ```
 % hget @@BASE_URL@@/SHA256SUMS > /tmp/SHA256SUMS
-% sha256sum go-plan9-$objtype.tar.gz
+% sha1sum -2 256 go-plan9-$objtype.tar.gz
 % grep go-plan9-$objtype.tar.gz /tmp/SHA256SUMS
 ```
 

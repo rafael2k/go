@@ -1,0 +1,243 @@
+#!/bin/rc
+# install-go.rc -- install the plan9 Go bootstrap on 9front.
+#
+# Downloads go-plan9-$arch.tar.gz from a public HTTP host, verifies its
+# sha256 against the SHA256SUMS manifest published alongside, and extracts
+# it into $goroot.  Prints the snippet to add to $home/lib/profile.
+#
+# usage: install-go.rc [-base URL] [-goroot DIR] [-arch amd64|arm64] [-y]
+#
+# Defaults:
+#   base   = https://sdrtelecom.com.br/go-plan9
+#   goroot = /sys/lib/go
+#   arch   = $objtype  (set by the running kernel)
+#
+# Examples:
+#   # default: install /sys/lib/go for the current $objtype
+#   ./install-go.rc -y
+#
+#   # install into your home dir instead
+#   ./install-go.rc -goroot $home/go -y
+#
+#   # install the arm64 build (cross-host)
+#   ./install-go.rc -arch arm64 -goroot $home/go.arm64 -y
+
+rfork e
+
+base=https://sdrtelecom.com.br/go-plan9
+goroot=/sys/lib/go
+arch=$objtype
+assume_yes=0
+
+fn usage {
+	echo 'usage: install-go.rc [-base URL] [-goroot DIR] [-arch amd64|arm64] [-y]' >[1=2]
+	exit usage
+}
+
+while(~ $1 -*){
+	switch($1){
+	case -base
+		base=$2
+		shift; shift
+	case -goroot
+		goroot=$2
+		shift; shift
+	case -arch
+		arch=$2
+		shift; shift
+	case -y
+		assume_yes=1
+		shift
+	case -h --help
+		usage
+	case *
+		usage
+	}
+}
+if(! ~ $#* 0)
+	usage
+
+if(! ~ $arch amd64 arm64){
+	echo install-go.rc: unsupported arch $arch '(expected amd64 or arm64)' >[1=2]
+	exit arch
+}
+
+tarball=go-plan9-$arch.tar.gz
+tmp=/tmp/install-go.$pid
+
+echo 'install-go.rc:'
+echo '  base    ' $base
+echo '  goroot  ' $goroot
+echo '  arch    ' $arch
+echo '  tarball ' $tarball
+
+parent=`{echo $goroot | sed 's,/[^/]*$,,'}
+if(~ $#parent 0 || ~ $parent '')
+	parent=/
+if(! test -d $parent){
+	echo install-go.rc: parent of $goroot '('$parent') does not exist' >[1=2]
+	exit nopar
+}
+# We deliberately don't pre-check writability with `test -w`: on Plan 9 it
+# only returns true if the user is the file owner, while /sys/lib (for
+# example) is writable by group sys to the hostowner.  We try the actual
+# mkdir below and report a friendly error if it fails.
+if(test -e $goroot && ! ~ $assume_yes 1){
+	echo $goroot already exists; rerun with -y to back it up and replace >[1=2]
+	exit exists
+}
+
+if(! mkdir -p $tmp){
+	echo install-go.rc: cannot create $tmp '(as user '$user')' >[1=2]
+	exit tmpdir
+}
+cd $tmp
+
+# hget needs webfs (/mnt/web).  9front's termrc may or may not have one
+# running.  Any pre-existing webfs that came up before the interfaces did
+# can be wedged with "0 No status / bad ip address syntax" errors, so we
+# always kill it and restart fresh.  -T 1200000 gives each request a
+# 20-minute timeout, generous enough for the 66 MB tarball over slow
+# links (and over slirp/TLS in QEMU TCG).
+kill webfs | rc >[2]/dev/null
+sleep 1
+webfs -T 1200000
+sleep 1
+if(! test -e /mnt/web/clone){
+	echo install-go.rc: failed to start webfs '(needed by hget)' >[1=2]
+	cd / && rm -rf $tmp
+	exit webfs
+}
+
+# --- fetch SHA256SUMS ---------------------------------------------------
+echo
+echo fetching $base/SHA256SUMS
+if(! hget $base/SHA256SUMS > SHA256SUMS){
+	echo install-go.rc: SHA256SUMS download failed >[1=2]
+	cd / && rm -rf $tmp
+	exit hgetsums
+}
+
+want=`{grep '  '^$tarball^'$' SHA256SUMS | awk '{print $1}'}
+if(~ $#want 0)
+	want=`{grep '	'^$tarball^'$' SHA256SUMS | awk '{print $1}'}
+if(~ $#want 0){
+	echo install-go.rc: no SHA256SUMS entry for $tarball >[1=2]
+	cat SHA256SUMS >[1=2]
+	cd / && rm -rf $tmp
+	exit nosums
+}
+echo expected sha256: $want
+
+# --- fetch tarball, with up to 3 attempts -------------------------------
+# rc has no `break`, so the loop body is guarded by `~ $ok no`.
+ok=no
+for(attempt in 1 2 3){
+	if(~ $ok no){
+		echo
+		echo fetching $base/$tarball '(attempt' $attempt')'
+		hget $base/$tarball > $tarball
+		hget_status=$status
+		if(! ~ $hget_status ''){
+			echo install-go.rc: hget failed on attempt $attempt '('$hget_status')' >[1=2]
+			sleep 2
+		}
+		if not {
+			got=`{sha1sum -2 256 $tarball | awk '{print $1}'}
+			echo got sha256:      $got
+			if(~ $got $want)
+				ok=yes
+			if not {
+				echo install-go.rc: sha256 mismatch on attempt $attempt >[1=2]
+				sleep 2
+			}
+		}
+	}
+}
+if(~ $ok no){
+	echo install-go.rc: giving up after 3 attempts >[1=2]
+	cd / && rm -rf $tmp
+	exit hgettar
+}
+
+# --- extract -----------------------------------------------------------
+# 9front mv(1) refuses to move directories across parents -- Plan 9
+# wstat only supports renames inside a single directory.  We therefore
+# extract directly inside $parent (where the tarball produces $parent/go/)
+# and use same-directory mv operations to backup and rename.
+goname=`{basename $goroot}
+bak=$parent/$goname.bak.$pid
+
+# Step 1: back up any existing $goroot (same-directory rename).
+if(test -e $goroot){
+	echo backing up existing $goroot to $bak
+	if(! mv $goroot $bak){
+		echo install-go.rc: backup mv failed '(as user '$user')' >[1=2]
+		cd / && rm -rf $tmp
+		exit backup
+	}
+}
+
+# Step 2: ensure no leftover $parent/go from a previous interrupted run.
+if(test -e $parent/go){
+	stale=$parent/go.stale.$pid
+	echo moving stale $parent/go aside to $stale
+	mv $parent/go $stale
+}
+
+# Step 3: extract directly in $parent; produces $parent/go/.
+echo
+echo extracting under $parent
+cd $parent
+if(! gunzip < $tmp/$tarball | tar x){
+	echo install-go.rc: extraction failed >[1=2]
+	rm -rf $parent/go >[2]/dev/null
+	cd / && rm -rf $tmp
+	exit untar
+}
+if(! test -d $parent/go){
+	echo install-go.rc: tarball missing top-level go/ directory >[1=2]
+	cd / && rm -rf $tmp
+	exit notgo
+}
+if(! test -x $parent/go/bin/go){
+	echo install-go.rc: extracted tree is missing go/bin/go >[1=2]
+	rm -rf $parent/go
+	cd / && rm -rf $tmp
+	exit incomplete
+}
+
+# Step 4: if user wants a different name than "go", rename in place.
+echo installing into $goroot
+if(! ~ $goname go){
+	if(! mv $parent/go $goroot){
+		echo install-go.rc: rename $parent/go to $goroot failed '(as user '$user')' >[1=2]
+		exit move
+	}
+}
+
+cd /
+rm -rf $tmp
+
+# --- verify post-install ------------------------------------------------
+echo
+echo running '`'$goroot/bin/go version'`':
+if(! GOROOT=$goroot GOENV=off GOPATH=/tmp/install-go.gopath $goroot/bin/go version){
+	echo install-go.rc: $goroot/bin/go version failed >[1=2]
+	exit verify
+}
+rm -rf /tmp/install-go.gopath
+
+# --- show profile snippet -----------------------------------------------
+echo
+echo to make this permanent, append the following to '$home/lib/profile':
+echo
+echo '	GOROOT='$goroot
+echo '	path=($path '$goroot/bin')'
+echo
+echo or, for this session only:
+echo
+echo '	bind -bc' $goroot/bin /$objtype/bin
+echo
+
+exit ''

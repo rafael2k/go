@@ -1,6 +1,6 @@
 # Build-and-Publish Agent — Plan 9 / 9front Go bootstrap
 
-You produce a six-file static drop and place it behind a single public
+You produce a seven-file static drop and place it behind a single public
 HTTP(S) base URL so 9front users can `hget` a Go bootstrap straight onto
 their machine.
 
@@ -8,11 +8,11 @@ Inputs to you: a clean checkout of this Go repo (branch `plan9-arm64-dev`
 or any branch that contains `misc/plan9/dist/`) and a target webroot you
 control.
 
-Output: six URLs under one base, all returning the expected bytes.
+Output: seven URLs under one base, all returning the expected bytes.
 
 ---
 
-## 0. The six files
+## 0. The seven files
 
 Final webroot must look exactly like:
 
@@ -22,12 +22,15 @@ $BASE_URL/
 ├── go-plan9-arm64.tar.gz   ~62 MiB   Go bootstrap, plan9/arm64
 ├── go-src.tar.gz           ~34 MiB   matching source archive
 ├── SHA256SUMS                256 B   sha256 of the three tarballs above
+├── install-go.rc           ~5 KiB    9front rc installer (BASE_URL baked in)
 ├── index.md                ~3 KiB    markdown landing page
-└── index.html              ~5 KiB    standalone HTML landing page
+└── index.html              ~6 KiB    standalone HTML landing page
 ```
 
 All links inside `index.md` / `index.html` are relative, so the drop is
-self-contained and can be hosted at any path.
+self-contained and can be hosted at any path.  The installer's `base=`
+default is rewritten by `build-bootstrap.sh` to the published `BASE_URL`,
+so end-users running `hget URL/install-go.rc | rc` need no extra flags.
 
 No other files. Don't publish `AGENT.md`, the build script, the
 `templates/` directory, or anything from `tmp-9front-dist/` that isn't
@@ -95,7 +98,10 @@ What the script does:
    `misc/plan9/dist/templates/index.{md,html}.tmpl`, substituting
    `@@VERSION@@`, `@@SHA256_*@@`, `@@SIZE_*@@`, `@@SOURCE_COMMIT@@`,
    `@@UPSTREAM_BASE@@`, `@@BUILD_DATE@@`, `@@BASE_URL@@`.
-9. Removes the temporary `VERSION` file and unstashes the `tmp-*` dirs.
+9. Copies `misc/plan9/dist/install-go.rc` into the output, rewriting its
+   `base=` default to the configured `BASE_URL` so end-users can run
+   `hget $BASE_URL/install-go.rc | rc` with no extra flags.
+10. Removes the temporary `VERSION` file and unstashes the `tmp-*` dirs.
 
 Final layout:
 
@@ -105,22 +111,23 @@ $REPO/tmp-9front-dist/
 ├── go-plan9-arm64.tar.gz
 ├── go-src.tar.gz
 ├── SHA256SUMS
+├── install-go.rc
 ├── index.md
 └── index.html
 ```
 
-That's all six files. If anything else lands in there, delete it before
-publishing.
+That's all seven files. If anything else lands in there, delete it
+before publishing.
 
 ### Local sanity checks (do these before uploading)
 
 ```sh
 cd $REPO/tmp-9front-dist
 
-# 1. Six files, no surprises.
+# 1. Seven files, no surprises.
 ls -1
 # expect: SHA256SUMS  go-plan9-amd64.tar.gz  go-plan9-arm64.tar.gz
-#         go-src.tar.gz  index.html  index.md
+#         go-src.tar.gz  index.html  index.md  install-go.rc
 
 # 2. Checksums round-trip locally.
 sha256sum -c SHA256SUMS
@@ -134,6 +141,10 @@ done
 # 4. VERSION inside the tarballs matches what the landing page advertises.
 tar -xzOf go-plan9-amd64.tar.gz go/VERSION
 grep -E '^- Version: ' index.md
+
+# 5. install-go.rc has the right BASE_URL baked in.
+grep '^base=' install-go.rc
+# expect: base=<your BASE_URL>
 ```
 
 Both `tar` commands above must yield the same version string. If they
@@ -157,6 +168,7 @@ This step depends on the transport your webroot expects. The contract is:
 |-----------------|------------------------------------|
 | `*.tar.gz`      | `application/gzip`                 |
 | `SHA256SUMS`    | `text/plain; charset=utf-8`        |
+| `install-go.rc` | `text/plain; charset=utf-8`        |
 | `*.md`          | `text/markdown; charset=utf-8`     |
 | `*.html`        | `text/html; charset=utf-8`         |
 
@@ -222,7 +234,7 @@ BASE_URL=https://your-host.example.com/path/to/go-plan9
 
 # 1. Each URL returns 200 and the expected byte length.
 for f in go-plan9-amd64.tar.gz go-plan9-arm64.tar.gz go-src.tar.gz \
-         SHA256SUMS index.md index.html; do
+         SHA256SUMS install-go.rc index.md index.html; do
     remote=$(curl -fsSLI "$BASE_URL/$f" | awk '/[Cc]ontent-[Ll]ength/{print $2}' | tr -d '\r')
     local=$(stat -c%s "tmp-9front-dist/$f")
     printf '%-25s remote=%s local=%s %s\n' "$f" "$remote" "$local" \
@@ -269,6 +281,7 @@ artifacts:
   - https://your-host.example.com/path/to/go-plan9/go-plan9-arm64.tar.gz
   - https://your-host.example.com/path/to/go-plan9/go-src.tar.gz
   - https://your-host.example.com/path/to/go-plan9/SHA256SUMS
+  - https://your-host.example.com/path/to/go-plan9/install-go.rc
   - https://your-host.example.com/path/to/go-plan9/index.md
   - https://your-host.example.com/path/to/go-plan9/index.html
 sha256_ok: true
@@ -276,9 +289,16 @@ size_ok:   true
 landing_page: https://your-host.example.com/path/to/go-plan9/
 ```
 
-Hand `base_url` back to the maintainer of this repo. They'll wire it
-into `misc/plan9/dist/install-go.rc` (the 9front-native installer that
-performs `hget | gunzip | tar x` plus profile patching).
+End-users can now install with a single command on 9front:
+
+```
+% hget https://your-host.example.com/path/to/go-plan9/install-go.rc | rc -- -y
+```
+
+The bundled `install-go.rc` already points at this `BASE_URL` (the build
+script rewrites its `base=` default), so no extra flags are required.
+Hand `base_url` back to the maintainer of this repo so they can update
+the canonical link list.
 
 ---
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Build the six-file webroot drop for the Plan 9 / 9front Go bootstrap.
+# Build the seven-file webroot drop for the Plan 9 / 9front Go bootstrap.
 #
 # Output (default: $REPO_ROOT/tmp-9front-dist/):
 #   go-plan9-amd64.tar.gz   plan9/amd64 bootstrap
 #   go-plan9-arm64.tar.gz   plan9/arm64 bootstrap
 #   go-src.tar.gz           matching source archive
 #   SHA256SUMS              checksums of the three tarballs above
+#   install-go.rc           9front rc(1) installer (run with `hget URL | rc`)
 #   index.md                landing page (markdown, with BASE_URL substituted)
 #   index.html              landing page (html,    with BASE_URL substituted)
 #
@@ -32,7 +33,10 @@ set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
 out_dir=${OUT_DIR:-"$repo_root/tmp-9front-dist"}
-base_url=${BASE_URL:-"BASE-URL"}
+# Public webroot where the artifacts are (or will be) hosted.  The default
+# matches the canonical drop maintained for the plan9/arm64 port; override
+# with BASE_URL=... when republishing to a different host.
+base_url=${BASE_URL:-"https://sdrtelecom.com.br/go-plan9"}
 template_dir=$repo_root/misc/plan9/dist/templates
 
 if [ ! -d "$template_dir" ]; then
@@ -167,17 +171,25 @@ log "rendering landing pages (BASE_URL=$base_url)"
 render "$template_dir/index.md.tmpl"   "$work_dir/index.md"
 render "$template_dir/index.html.tmpl" "$work_dir/index.html"
 
+# --- step 8b: bake BASE_URL into install-go.rc as its default ----------
+sed -e "s|^base=.*|base=$base_url|" \
+	"$repo_root/misc/plan9/dist/install-go.rc" \
+	> "$work_dir/install-go.rc"
+chmod +x "$work_dir/install-go.rc"
+
 # --- step 9: publish work dir into $OUT_DIR (atomic) --------------------
 # Replace any existing $OUT_DIR contents wholesale, so partial outputs
 # from a previous failed run can't survive into a new publish.
 log "syncing work dir → $out_dir"
 mkdir -p "$out_dir"
 rm -f "$out_dir"/go-plan9-*.tar.gz "$out_dir"/go-src.tar.gz \
-      "$out_dir"/SHA256SUMS "$out_dir"/index.md "$out_dir"/index.html
+      "$out_dir"/SHA256SUMS "$out_dir"/install-go.rc \
+      "$out_dir"/index.md "$out_dir"/index.html
 mv "$work_dir"/go-plan9-amd64.tar.gz \
    "$work_dir"/go-plan9-arm64.tar.gz \
    "$work_dir"/go-src.tar.gz \
    "$work_dir"/SHA256SUMS \
+   "$work_dir"/install-go.rc \
    "$work_dir"/index.md \
    "$work_dir"/index.html \
    "$out_dir"/
@@ -191,10 +203,8 @@ printf '\nversion: %s\nbase_url placeholder in templates: %s\n' "$version" "$bas
 if [ "$base_url" = "BASE-URL" ]; then
 	cat <<'EOF'
 
-Note: BASE_URL was not set, so index.{md,html} still reference the
-"BASE-URL" placeholder.  Re-run with `BASE_URL=https://YOUR-HOST/path/`
-once the artifacts are hosted to produce final pages, or just sed the two
-files in place after upload (the tarballs themselves don't depend on
-BASE_URL).
+Note: BASE_URL was explicitly set to "BASE-URL", so index.{md,html} keep
+the placeholder.  Re-run with `BASE_URL=https://YOUR-HOST/path/` (or
+accept the default) to produce final pages.
 EOF
 fi

@@ -76,6 +76,34 @@ on top of upstream Go.</p>
 
 <h2>Install on 9front</h2>
 
+<h3>Option A: install-go.rc (recommended)</h3>
+
+<p>One-shot installer that downloads the tarball for <code>$objtype</code>,
+verifies its sha256, restarts <code>webfs</code>, and extracts into
+<code>$goroot</code> (default <code>/sys/lib/go</code>):</p>
+
+<pre>% hget @@BASE_URL@@/install-go.rc | rc -- -y</pre>
+
+<p>Or, fetch first if you want to read it before running:</p>
+
+<pre>% hget @@BASE_URL@@/install-go.rc &gt; /tmp/install-go.rc
+% rc /tmp/install-go.rc -y</pre>
+
+<p>Available flags:</p>
+
+<ul>
+  <li><code>-base URL</code> &mdash; override the download root
+      (default <code>@@BASE_URL@@</code>)</li>
+  <li><code>-goroot DIR</code> &mdash; override the install location
+      (default <code>/sys/lib/go</code>)</li>
+  <li><code>-arch ARCH</code> &mdash; override <code>$objtype</code>
+      (<code>amd64</code> or <code>arm64</code>)</li>
+  <li><code>-y</code> &mdash; non-interactive: back up any existing
+      <code>$goroot</code> before installing</li>
+</ul>
+
+<h3>Option B: manual</h3>
+
 <p>Pick the tarball matching <code>$objtype</code> (<code>amd64</code> or
 <code>arm64</code>):</p>
 
@@ -84,7 +112,10 @@ on top of upstream Go.</p>
 % bind -bc /sys/lib/go/bin /$objtype/bin
 % GOROOT=/sys/lib/go go version</pre>
 
-<p>To make it persistent, add to <code>$home/lib/profile</code>:</p>
+<h3>After install</h3>
+
+<p>To make <code>go</code> available in every shell, add to
+<code>$home/lib/profile</code>:</p>
 
 <pre>GOROOT=/sys/lib/go
 path=($path /sys/lib/go/bin)</pre>
@@ -92,7 +123,7 @@ path=($path /sys/lib/go/bin)</pre>
 <h2>Verify</h2>
 
 <pre>% hget @@BASE_URL@@/SHA256SUMS &gt; /tmp/SHA256SUMS
-% sha256sum go-plan9-$objtype.tar.gz
+% sha1sum -2 256 go-plan9-$objtype.tar.gz
 % grep go-plan9-$objtype.tar.gz /tmp/SHA256SUMS</pre>
 
 <p>The two sha256 hex strings must match.</p>

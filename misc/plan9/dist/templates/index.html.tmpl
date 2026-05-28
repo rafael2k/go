@@ -80,9 +80,19 @@ on top of upstream Go.</p>
 
 <p>One-shot installer that downloads the tarball for <code>$objtype</code>,
 verifies its sha256, restarts <code>webfs</code>, and extracts into
-<code>$goroot</code> (default <code>/sys/lib/go</code>):</p>
+<code>$goroot</code> (default <code>/sys/lib/go</code>).</p>
 
-<pre>% hget @@BASE_URL@@/install-go.rc | rc -- -y</pre>
+<p>Fresh install (no existing <code>/sys/lib/go</code>):</p>
+
+<pre>% hget @@BASE_URL@@/install-go.rc | rc</pre>
+
+<p>With flags (<code>-y</code> to back up and replace an existing
+install, custom <code>-goroot</code>, etc.).  9front rc has no
+<code>--</code> flag-end; pipe into the dot builtin so the script sees
+the positional args:</p>
+
+<pre>% hget @@BASE_URL@@/install-go.rc | rc -c '. /fd/0 -y'
+% hget @@BASE_URL@@/install-go.rc | rc -c '. /fd/0 -y -goroot $home/go'</pre>
 
 <p>Or, fetch first if you want to read it before running:</p>
 

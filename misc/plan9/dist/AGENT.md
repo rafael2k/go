@@ -292,11 +292,21 @@ landing_page: https://your-host.example.com/path/to/go-plan9/
 End-users can now install with a single command on 9front:
 
 ```
-% hget https://your-host.example.com/path/to/go-plan9/install-go.rc | rc -- -y
+% hget https://your-host.example.com/path/to/go-plan9/install-go.rc | rc
+```
+
+(That form works on a fresh machine because `$goroot=/sys/lib/go`
+doesn't yet exist.  To force a re-install, or to pass other flags, pipe
+into `rc -c '. /fd/0 args...'` -- 9front's rc has no `--` flag-end and
+does not accept positional args after a piped script:)
+
+```
+% hget URL/install-go.rc | rc -c '. /fd/0 -y'
+% hget URL/install-go.rc | rc -c '. /fd/0 -y -goroot $home/go'
 ```
 
 The bundled `install-go.rc` already points at this `BASE_URL` (the build
-script rewrites its `base=` default), so no extra flags are required.
+script rewrites its `base=` default), so no `-base` flag is required.
 Hand `base_url` back to the maintainer of this repo so they can update
 the canonical link list.
 

@@ -35,12 +35,28 @@ echo network-setup /net/ndb:
 cat /net/ndb >[2]/dev/null
 
 # --- run the installer --------------------------------------------------
+# Exercise the canonical "hget URL | rc" one-liner against the live
+# webroot, not just `rc /path/to/install-go.rc`.  This catches things
+# like webfs needing to be killed/restarted, $argv0 differences, and
+# pipe-into-rc positional-arg handling -- the exact path real users hit.
 echo TEST install-go.rc-run
 goroot=/tmp/go-install-smoke
 if(test -e $goroot)
 	rm -rf $goroot
 
-rc /n/dos/install-go.rc -y -goroot $goroot
+# webfs comes up wedged in the smoke test image, so prime it here too;
+# the installer also does this but doing it upfront makes the failure
+# mode of `hget install-go.rc` easier to read.
+kill webfs | rc >[2]/dev/null
+sleep 1
+webfs -T 1200000
+sleep 1
+
+# 9front's rc(1) has no `--` flag-end and does not let positional args
+# follow the script on stdin, so pipe into `rc -c '. /fd/0 args...'`
+# instead: the dot builtin sources the script and forwards its argv.
+hget https://sdrtelecom.com.br/go-plan9/install-go.rc \
+	| rc -c '. /fd/0 -y -goroot '$goroot
 echo TEST install-go.rc-run $status
 
 # --- post-install verification -----------------------------------------

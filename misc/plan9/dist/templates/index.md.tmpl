@@ -28,10 +28,21 @@ Checksum manifest: [SHA256SUMS](SHA256SUMS)
 
 One-shot installer that downloads the tarball for `$objtype`, verifies
 its sha256, restarts `webfs`, and extracts into `$goroot` (default
-`/sys/lib/go`):
+`/sys/lib/go`).
+
+Fresh install (no existing `/sys/lib/go`):
 
 ```
-% hget @@BASE_URL@@/install-go.rc | rc -- -y
+% hget @@BASE_URL@@/install-go.rc | rc
+```
+
+With flags (`-y` to back up and replace an existing install, custom
+`-goroot`, etc.).  9front rc has no `--` flag-end; pipe into the dot
+builtin so the script sees the positional args:
+
+```
+% hget @@BASE_URL@@/install-go.rc | rc -c '. /fd/0 -y'
+% hget @@BASE_URL@@/install-go.rc | rc -c '. /fd/0 -y -goroot $home/go'
 ```
 
 Or, fetch first if you want to read it before running:

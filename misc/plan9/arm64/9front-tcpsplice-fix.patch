@@ -1,43 +1,39 @@
-9front TCP loopback splice: propagate peer close to writer
+From b85305bfd08eed02a00f32dd7e2816b40985f21c Mon Sep 17 00:00:00 2001
+From: Rafael Diniz <rafael.1.diniz@nokia.com>
+Date: Thu, 21 May 2026 13:58:17 +0100
+Subject: [PATCH 1/2] ip/tcp: propagate peer close to spliced loopback writer
 
-When two TCP conversations on the same kernel connect to each other on
-loopback, /sys/src/9/ip/tcp.c tcpincoming() splices them via
-tcpsplice(), which installs a bypass function (tcpbypass) on each side's
-wq that copies blocks directly into the other side's rq.  This avoids
-the cost of running the TCP state machine on packets that never leave
-the kernel.
+When two TCP conversations on the same kernel connect to each other
+on loopback, tcpincoming() splices them via tcpsplice(), installing
+tcpbypass() on each side's wq to copy blocks directly into the other
+side's rq.  When one side closes, tcpsetstate(Closed) clears its own
+bypass but leaves the peer's wq with a kick that still points at us;
+the next user write reaches tcpbypass(), sees the missing peer and
+silently drops the block, and qbwrite() returns blocklen(b).  The
+writer therefore sees writes "succeeding" forever and never observes
+the peer close.
 
-The splice handling does not propagate peer close to the writer.  When
-one side calls "close" on its ctl file, tcpclose() (case Established
-with tcb->bypass != nil) hangs up the OTHER side's rq and then calls
-localclose() on itself, which clears its own bypass.  The other side's
-wq is left intact, with the bypass kick still pointing at us.
+Hang up the peer's wq from the Closed arm of tcpsetstate() so its
+next user write returns "connection closed" via qbwrite() instead of
+running the now-stale bypass.
 
-When the other side's user then writes more data, qbwrite() in
-sys/src/9/port/qio.c (line ~1027) calls the bypass without checking for
-errors and returns blocklen(b) regardless of the outcome.  tcpbypass()
-sees that o->ptcl->bypass is now nil (because we cleared it), takes the
-"frees the block" branch and silently returns.  The writer sees a
-successful write of len bytes that were actually dropped on the floor.
-No error, no FIN, no RST -- writes keep "succeeding" forever.
+Reproducer: misc/plan9/arm64/loopback-close-probe.go in the Go
+plan9-arm64 port (https://go-review.googlesource.com/c/go/+/719643)
+runs three scenarios and reports the writer Write() failing within a
+few milliseconds after the peer's Close(), as on Linux and the BSDs,
+instead of accepting 1 GiB of dropped data.
 
-This breaks Go test code that relies on the usual TCP close semantics
-("after the peer closes its half, my next Write eventually fails").
-Several net/http and crypto/tls tests use that pattern on loopback to
-test cancellation and timeout paths.  See for example
-net/http.TestServerNoWriteTimeout and
-net/http.TestTransportReqCancelerCleanupOnRequestBodyWriteError, which
-were filed as plan9-specific skips while this kernel bug exists.
+The same bug should exist in 9legacy since the splice logic predates
+the fork.
+---
+ sys/src/9/ip/tcp.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
 
-The fix is small: when tcpsetstate(Closed) tears down a spliced
-conversation, it should also hang up the OTHER side's wq so that the
-other side's next user write returns an error from qbwrite() instead of
-running the now-broken bypass.
-
+diff --git a/sys/src/9/ip/tcp.c b/sys/src/9/ip/tcp.c
+index ebbf43ef0..6d5fa8f29 100644
 --- a/sys/src/9/ip/tcp.c
 +++ b/sys/src/9/ip/tcp.c
-@@ -412,8 +412,15 @@ tcpsetstate(Conv *s, uchar newstate)
- 		qclose(s->rq);
+@@ -413,6 +413,13 @@ tcpsetstate(Conv *s, uchar newstate)
  		qclose(s->wq);
  		qclose(s->eq);
  		if(tcb->bypass != nil){
@@ -51,36 +47,94 @@ running the now-broken bypass.
  			tcb->bypass = nil;
  			qsetbypass(s->wq, nil);
  		}
- 		break;
+-- 
+2.43.0
 
-A defensive change in tcpbypass() that error()s when the splice peer is
-gone is also safe and easier to reason about:
 
+From 950c20d4827f8ef313bc2fb630b9f5579770887b Mon Sep 17 00:00:00 2001
+From: Rafael Diniz <rafael.1.diniz@nokia.com>
+Date: Fri, 22 May 2026 02:30:29 +0100
+Subject: [PATCH 2/2] ip/tcp: skip stray FIN when spliced peer was torn down
+
+c95f8567c ("ip/tcp: propagate peer close to spliced loopback writer")
+clears the surviving end's bypass pointer and hangs up its wq so that a
+write into a now-dead splice partner fails fast.  However, when that
+surviving end later runs tcpclose() the Established arm sees
+bypass==nil, falls through to the Syn_received clause and calls
+tcpoutput(), which sends a FIN to the peer's old (l, r)addr/port tuple.
+
+The peer is already iphtrem'd, so iphtlook() fails and we sndrst()
+back.  Normally the RST harmlessly dies in iphtlook() too, but under
+SMP it can race against a concurrent active connect from another conv
+that just happens to be assigned the same ephemeral lport
+(1/32768 chance), and that fresh conv suddenly observes Econrefused on
+its first read - visible in Go's net.TestVariousDeadlines as a
+"Copy = 0, <nil>; want timeout" flake at sub-millisecond deadlines.
+
+Mark the surviving end with a new Tcpctl.bypeerclosed flag from
+tcpsetstate(Closed) before clearing its bypass (the order matters so
+that on TSO a tcpclose() seeing bypass==nil is guaranteed to also see
+bypeerclosed==1), and teach tcpclose() to localclose() locally instead
+of sending the doomed FIN.
+
+Verified with the new misc/plan9/amd64/guest-deadline-stress.rc
+harness in the Go plan9-arm64 port: 30 -count iterations of
+net.TestVariousDeadlines (= 1710 deadline cycles) on -smp 4 pass
+cleanly, where the previous patched kernel reproduced 5-6 failures.
+---
+ sys/src/9/ip/tcp.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/sys/src/9/ip/tcp.c b/sys/src/9/ip/tcp.c
+index 6d5fa8f29..d7fd9bb83 100644
 --- a/sys/src/9/ip/tcp.c
 +++ b/sys/src/9/ip/tcp.c
-@@ -1589,10 +1589,11 @@ static void
- tcpbypass(void *arg, Block *b)
- {
- 	Conv *c = (Conv*)arg;
- 	Tcpctl *tcb = (Tcpctl*)c->ptcl;
- 	Conv *o = tcb->bypass;
+@@ -204,6 +204,7 @@ struct Tcpctl
+ 	uchar	state;			/* Connection state */
+ 	uchar	flags;			/* State flags */
+ 	uchar	flgcnt;			/* Number of flags in the send sequence (FIN,SYN) */
++	uchar	bypeerclosed;		/* spliced peer was torn down via tcpsetstate Closed */
+ 	struct {
+ 		ulong	una;		/* Unacked data pointer */
+ 		ulong	nxt;		/* Next sequence expected */
+@@ -416,6 +417,17 @@ tcpsetstate(Conv *s, uchar newstate)
+ 			Conv *o = tcb->bypass;
+ 			Tcpctl *otcb = (Tcpctl*)o->ptcl;
+ 			if(otcb->bypass == s){
++				/*
++				 * Set the bypeerclosed flag BEFORE clearing
++				 * the peer's bypass pointer.  The peer's
++				 * tcpclose path tests bypass first and then
++				 * bypeerclosed; on TSO this order guarantees
++				 * that if it observes bypass=nil it will also
++				 * observe bypeerclosed=1 and take the
++				 * "local close" branch instead of sending a
++				 * stray FIN.
++				 */
++				otcb->bypeerclosed = 1;
+ 				otcb->bypass = nil;
+ 				qsetbypass(o->wq, nil);
+ 				qhangup(o->wq, "connection closed");
+@@ -540,6 +552,19 @@ tcpclose(Conv *c)
+ 			localclose(c, nil);
+ 			break;
+ 		}
++		if(tcb->bypeerclosed){
++			/*
++			 * Spliced peer was torn down in tcpsetstate(Closed)
++			 * and is no longer in the iphash.  Sending a FIN to
++			 * it would only bounce back as a RST that might land
++			 * on a freshly recycled conv with the same iphash
++			 * key (rare under SMP but observable in
++			 * net.TestVariousDeadlines).  Just localclose
++			 * ourselves; the peer has already moved on.
++			 */
++			localclose(c, nil);
++			break;
++		}
+ 		/* wet floor */
+ 	case Syn_received:
+ 		tcb->flgcnt++;
+-- 
+2.43.0
 
- 	if(o == nil || ((Tcpctl*)o->ptcl)->bypass != c){
- 		freeblist(b);
--		return;
-+		error("connection closed");
- 	}
- 	qbwrite(o->rq, b);
- }
-
-With either fix, the loopback-close-probe at
-misc/plan9/arm64/loopback-close-probe.go reports the writer Write()
-failing within a few milliseconds of the peer's Close(), as on Linux
-and the BSDs, instead of accepting 1 GiB of dropped data.
-
-The same bug should exist in 9legacy, since the splice logic predates
-the 9front fork.  This patch is offered as a starting point for both
-kernels; the in-tree maintainers may prefer a slightly different
-shape (e.g. clearing the bypass and hanging up the wq from within the
-existing tcpclose() Established+bypass arm rather than from
-tcpsetstate()).

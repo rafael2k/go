@@ -1,9 +1,7 @@
 #!/bin/rc
-# Apply the loopback tcpsplice fix to /sys/src/9/ip/tcp.c and rebuild
-# the 9front aarch64 kernel.  Intended to be run from a 9front guest
-# that boots with the host's tmp-9front-goroot share mounted at /n/dos
-# (containing misc/plan9/arm64/9front-tcpsplice-fix.patch and the
-# patched tcp.c at misc/plan9/arm64/tcp.c.patched).
+# Apply the staged 9front Go/runtime fixes and rebuild the aarch64 kernel.
+# tcp.c is required.  If proc.c.patched and fault.c.patched are present,
+# install the SMP TLB-shootdown and shared-COW fixes as well.
 
 echo TEST kernel-rebuild
 
@@ -22,6 +20,21 @@ cp /sys/src/9/ip/tcp.c /sys/src/9/ip/tcp.c.orig
 
 echo kernel-rebuild: installing patched tcp.c
 cp /n/dos/misc/plan9/arm64/tcp.c.patched /sys/src/9/ip/tcp.c
+
+for(file in proc fault){
+	patched=/n/dos/misc/plan9/arm64/$file.c.patched
+	kernel=/sys/src/9/port/$file.c
+	if(test -f $patched){
+		if(! test -f $kernel){
+			echo kernel-rebuild: missing $kernel
+			exit nokernelsrc
+		}
+		echo kernel-rebuild: backing up original $file.c
+		cp $kernel $kernel.orig
+		echo kernel-rebuild: installing patched $file.c
+		cp $patched $kernel
+	}
+}
 
 echo kernel-rebuild: building 9qemu
 cd /sys/src/9/arm64

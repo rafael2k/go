@@ -184,14 +184,27 @@ PLAN9_TEST_WAIT=7200 timeout 7800s \
   misc/plan9/arm64/run-qemu-tests.sh -- '-run=^runtime$'
 ```
 
+To reproduce intermittent native compiler/cache corruption with a clean
+cache, use the native rebuild script. Its first argument controls both
+`GOMAXPROCS` and `go build -p`:
+
+```sh
+PLAN9_TEST_SCRIPT=/n/dos/misc/plan9/arm64/guest-native-rebuild.rc \
+PLAN9_SMP=4 PLAN9_TEST_WAIT=7200 timeout 7800s \
+  misc/plan9/arm64/run-qemu-tests.sh -m 3072 -- 4
+```
+
+`guest-native-rebuild-stress.rc` repeats fresh-cache builds of the packages
+from the compiler crash reports on Gerrit CL 719643.
+
 ## Optional: Build a Patched 9front Kernel
 
-The harness ships a small patch for the 9front kernel
-(`misc/plan9/arm64/9front-tcpsplice-fix.patch`) that propagates peer
-close to spliced loopback writers (see the test report for the full
-background).  The patched `tcp.c` and a rebuild script are also
-included so the patch can be verified end-to-end against a writable
-9front qcow2.
+The harness can stage three files from a patched 9front checkout:
+`sys/src/9/ip/tcp.c`, `sys/src/9/port/proc.c`, and
+`sys/src/9/port/fault.c`. These cover the spliced-loopback close fixes,
+the SMP TLB-shootdown fix, and the shared-segment COW flush. The rebuild
+script installs the staged files and verifies them end-to-end against a
+writable 9front qcow2.
 
 Workflow:
 
@@ -200,12 +213,12 @@ Workflow:
 cp tmp-9front-test/9front-11724.arm64.qcow2 \
    tmp-9front-test/9front-11724-patched.arm64.qcow2
 
-# 2. Stage the patched tcp.c into the share dir.
+# 2. Stage patched tcp.c, proc.c, and fault.c into the share dir.
 PLAN9_KERNEL_SRC=../9front \
   misc/plan9/arm64/make-goroot-share.sh
 
-# 3. Boot, copy patched tcp.c into /sys/src/9/ip/tcp.c, mk install,
-#    copy 9qemu into /n/9fat, shut down.
+# 3. Boot, install the staged kernel sources, mk install, copy 9qemu
+#    into /n/9fat, and shut down.
 misc/plan9/arm64/rebuild-9front-kernel.sh
 
 # 4. Re-run probe / tests pointing at the patched image.

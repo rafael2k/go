@@ -1,0 +1,49 @@
+# Repeated native compiler/cache stress for the intermittent plan9/arm64
+# corruption reported on Gerrit CL 719643.  Each iteration starts with a
+# fresh build cache and rebuilds the packages named in Richard Miller's
+# crash logs plus compiler packages, using four-way build parallelism.
+
+share=/n/dos
+goroot=/tmp/goroot
+go=$goroot/bin/go
+buildprocs=4
+packages=(internal/byteorder crypto/subtle time cmd/compile/internal/ssagen cmd/vendor/github.com/google/pprof/internal/graph)
+
+fn setupswap {
+	echo TEST swap-setup
+	swapfile=/tmp/swap
+	swapmb=1024
+	if(! test -e $swapfile)
+		dd -if /dev/zero -of $swapfile -bs 1048576 -count $swapmb
+	swap $swapfile
+	echo DONE swap-setup $status
+}
+
+fn setupgoroot {
+	echo TEST native-stress-goroot-copy
+	if(test -e $goroot)
+		rm -rf $goroot
+	mkdir -p $goroot
+	dircp $share $goroot
+	chmod 775 $goroot/bin/* $goroot/pkg/tool/plan9_arm64/*
+	echo DONE native-stress-goroot-copy $status
+}
+
+setupswap
+setupgoroot
+
+echo INFO native-stress buildprocs $buildprocs packages $packages
+cat /dev/sysstat
+
+for(iter in 1 2 3 4 5 6 7 8 9 10) {
+	echo TEST native-stress iteration $iter
+	rm -rf /tmp/gocache /tmp/gotmp
+	mkdir -p /tmp/gocache /tmp/gotmp
+	GOENV=off GOROOT=$goroot GOCACHE=/tmp/gocache GOTMPDIR=/tmp/gotmp GOPATH=/nonexist-gopath GOMAXPROCS=$buildprocs $go build -a -p $buildprocs $packages
+	st=$status
+	echo DONE native-stress iteration $iter result $st
+	if(! ~ $st '')
+		exit $st
+}
+
+echo SUMMARY native-stress all-iterations-passed

@@ -76,6 +76,14 @@ if [ -n "${PLAN9_KERNEL_SRC:-}" ] && [ -f "$PLAN9_KERNEL_SRC/sys/src/9/ip/tcp.c"
 	cp "$PLAN9_KERNEL_SRC/sys/src/9/ip/tcp.c" "$stage/misc/plan9/amd64/tcp.c.patched"
 fi
 
+if [ -n "${PLAN9_KERNEL_SRC:-}" ] &&
+   [ -f "$PLAN9_KERNEL_SRC/sys/src/9/port/proc.c" ] &&
+   [ -f "$PLAN9_KERNEL_SRC/sys/src/9/port/fault.c" ]; then
+	echo "staging patched 9front proc.c and fault.c from $PLAN9_KERNEL_SRC"
+	cp "$PLAN9_KERNEL_SRC/sys/src/9/port/proc.c" "$stage/misc/plan9/arm64/proc.c.patched"
+	cp "$PLAN9_KERNEL_SRC/sys/src/9/port/fault.c" "$stage/misc/plan9/arm64/fault.c.patched"
+fi
+
 echo "prepared QEMU VVFAT share at $stage"
 echo "use with: -drive if=none,file=fat:rw:$stage,format=raw,id=share0"
 

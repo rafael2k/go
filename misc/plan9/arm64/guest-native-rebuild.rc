@@ -1,0 +1,54 @@
+# Reproduce native plan9/arm64 compiler/cache corruption reported on Gerrit.
+#
+# The host cross-built toolchain is copied to a writable GOROOT, then the
+# native plan9/arm64 go command rebuilds std and cmd into a fresh cache.
+# First argument controls build parallelism; remaining arguments override
+# the package list.
+
+share=/n/dos
+goroot=/tmp/goroot
+go=$goroot/bin/go
+buildprocs=1
+packages=(std cmd)
+
+if(! ~ $#* 0) {
+	buildprocs=$1
+	shift
+}
+if(! ~ $#* 0)
+	packages=$*
+
+fn setupswap {
+	echo TEST swap-setup
+	swapfile=/tmp/swap
+	swapmb=1024
+	if(! test -e $swapfile)
+		dd -if /dev/zero -of $swapfile -bs 1048576 -count $swapmb
+	swap $swapfile
+	echo DONE swap-setup $status
+}
+
+fn setupgoroot {
+	echo TEST native-rebuild-goroot-copy
+	if(test -e $goroot)
+		rm -rf $goroot
+	mkdir -p $goroot
+	dircp $share $goroot
+	chmod 775 $goroot/bin/* $goroot/pkg/tool/plan9_arm64/*
+	echo DONE native-rebuild-goroot-copy $status
+}
+
+fn rebuild {
+	echo TEST native-rebuild buildprocs $buildprocs packages $packages
+	rm -rf /tmp/gocache /tmp/gotmp
+	mkdir -p /tmp/gocache /tmp/gotmp
+	GOENV=off GOROOT=$goroot GOCACHE=/tmp/gocache GOTMPDIR=/tmp/gotmp GOPATH=/nonexist-gopath GOMAXPROCS=$buildprocs $go build -a -p $buildprocs $packages
+	st=$status
+	echo DONE native-rebuild $st
+	if(! ~ $st '')
+		exit $st
+}
+
+setupswap
+setupgoroot
+rebuild
